@@ -1,0 +1,33 @@
+# Dependencies & build output
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+docs/
+
+# Secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Backend: generated Prisma artifacts & local SQLite
+backend/prisma/dev.db*
+backend/prisma/schema.sqlite.prisma
+backend/prisma/.sqlite-migrations-unused/
+backend/src/generated/
