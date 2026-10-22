@@ -3,6 +3,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { translateBodyParserErrors } from './problem-details/body-parser-errors';
+import { rejectDeepJson } from './problem-details/json-depth';
 import { ProblemDetailsFilter } from './problem-details/problem-details.filter';
 import { validationExceptionFactory } from './problem-details/validation-problem.exception';
 
@@ -27,6 +28,7 @@ export function configureApp(app: NestExpressApplication): void {
   app.use(helmet());
   app.useBodyParser('json', { limit: '100kb' });
   app.use(translateBodyParserErrors);
+  app.use(rejectDeepJson);
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

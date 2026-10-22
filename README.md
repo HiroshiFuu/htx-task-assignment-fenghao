@@ -2,7 +2,7 @@
 
 Full-stack task assignment app: Developers, Skills and Tasks (with unlimited nested subtasks). A task can only be assigned to a developer whose skills cover the task's required skills; tasks created without skills get them inferred by an LLM on the backend.
 
-> Status: **Phase P2 (backend REST API)**. Sections marked _TBD_ are filled in by later phases.
+> Status: **Phase P4 (subtasks)**. Sections marked _TBD_ are filled in by later phases.
 
 ## Tech stack
 
@@ -11,7 +11,7 @@ Full-stack task assignment app: Developers, Skills and Tasks (with unlimited nes
 | Backend | NestJS 11 + TypeScript (strict), Prisma 7 (driver adapters) |
 | Database | PostgreSQL 17 (Docker / deployment / migrations); SQLite for local development |
 | LLM | Google Gemini via `@google/genai` (optional; keyword fallback) |
-| Frontend | Vite + React 19 + TypeScript (strict) |
+| Frontend | Vite + React 19 + TypeScript (strict), React Router, TanStack Query, Tailwind CSS |
 | Tests | Backend: Jest + supertest. Frontend: Vitest + React Testing Library |
 | Deployment | Docker multi-stage builds, nginx reverse proxy |
 
@@ -34,8 +34,10 @@ npm run start:dev       # http://localhost:3000/api, Swagger UI at /api/docs
 # Frontend
 cd ..\frontend
 npm install
-npm run dev             # http://localhost:5173
+npm run dev             # http://localhost:5173 (proxies /api to the backend)
 ```
+
+The Vite dev server proxies `/api` to `http://localhost:3000`, mirroring the same-origin nginx setup in production, so no CORS is needed. If the backend runs elsewhere, set `API_PROXY_TARGET` before `npm run dev` (for example `$env:API_PROXY_TARGET="http://localhost:3001"`). This is read only by the dev server and never bundled.
 
 ### PostgreSQL (migrations and PG e2e)
 
@@ -63,10 +65,28 @@ _TBD (Phase P7)_. See [`.env.example`](.env.example), [`backend/.env.example`](b
 ## System design
 _Architecture diagram: TBD (Phase P7)_. Business rules and concurrency: see [API](#api).
 
+### Frontend (Phases P3–P4)
+
+| Route | Page |
+|---|---|
+| `/` | Task tree: Title / Skills / Status / Assignee. Subtasks are indented under their parent and collapsible; status and assignee change in place. |
+| `/tasks/new` | Create a task with nested subtasks (1 / 1.1 / 1.1.1 …), each with its own optional skills; the whole tree is saved in one request. |
+
+- **Server state** lives only in TanStack Query (`features/tasks/queries.ts`); the create form's tree lives in a `useReducer` (`task-draft.ts`: `ADD_SUBTASK`, `REMOVE_NODE`, `UPDATE_TITLE`, `TOGGLE_SKILL`, `RESET`, addressed by path).
+- **Recursive editor (Composite):** `TaskNodeEditor` renders one task and itself for each subtask. "Add subtask" is disabled at 5 levels or 50 tasks; a new subtask's title takes focus; the first invalid title is focused on submit; nested API field errors (`subtasks.0.subtasks.1.title`) appear next to the right subtask.
+- **Optimistic updates:** status and assignee changes update the cached tree immediately. If the API refuses, only that task's own fields are restored and the backend's reason (e.g. `SKILL_MISMATCH` detail) is announced. Either way the tree is refetched.
+- **Done rule hint:** "Done" is disabled while any subtask (at any depth) is open; the backend still enforces it (422 `SUBTASKS_NOT_DONE`).
+- **Cascade confirmation (D5):** reopening a Done task under Done parents opens `ConfirmCascadeDialog` (native `<dialog>` + `showModal()`, focus on Cancel, Esc cancels) listing the parents that will go back to In Progress. If the cached tree didn't predict it, the server's 409 opens the same dialog with its `affectedTasks`. Cancel leaves everything unchanged; confirm resubmits with `confirmCascade: true`, without optimistic update, then refetches the tree and announces how many tasks changed.
+- **Assignee options** list only developers whose skills cover the task (same superset rule as the backend, which still enforces it). With no eligible developer the select explains why.
+- **API client** (`api/client.ts`): same-origin `fetch` to `/api`, parses RFC 7807 errors into `ApiError`. Field errors from a 400 are shown next to their form field. Queries retry only on network/5xx errors, mutations never.
+- **Accessibility:** semantic `<table>` with column headers, a visually hidden label for every select, a `<fieldset>`/`<legend>` for skills, errors linked with `aria-describedby` and `aria-invalid`, feedback in an `aria-live="polite"` region, a skip link, and everything usable by keyboard.
+- **Responsive:** below the `md` breakpoint each table row becomes a card. Cells stack and show their column name via `data-label`, so there is one DOM and no duplicated controls.
+- **Robustness:** pages are lazy-loaded per route; a router error boundary shows a recoverable message instead of raw errors; loading, empty and error states are handled.
+
 ### Prisma generated client
 `prisma generate` turns `schema.prisma` into a TypeScript client in `backend/src/generated/prisma/` (gitignored). Prisma 7 emits it into the source tree instead of `node_modules`, so it compiles with the app and is imported like any module (`../generated/prisma/client`). It is regenerated automatically by `start:dev`, `db:reset`, `test:e2e` and `test:e2e:pg`. The client is specific to one database provider, so it must be regenerated when switching between SQLite and PostgreSQL.
 
-### Data model (Phase P1)
+### Data model
 
 ```mermaid
 erDiagram
@@ -75,6 +95,7 @@ erDiagram
   tasks      ||--o{ task_skills      : requires
   skills     ||--o{ task_skills      : "required by"
   developers |o--o{ tasks            : "assigned to"
+  tasks      |o--o{ tasks            : "parent of"
 ```
 
 | Table | Notes |
@@ -82,12 +103,13 @@ erDiagram
 | `skills` | `name` unique, varchar(50) |
 | `developers` | `name` varchar(100) |
 | `developer_skills` | PK (`developer_id`, `skill_id`); deleting a developer cascades, deleting a skill in use is restricted |
-| `tasks` | `title` varchar(500) + PG `CHECK (length(trim(title)) > 0)`; `status` enum `TODO`/`IN_PROGRESS`/`DONE`; `assignee_id` set to NULL when the developer is deleted |
+| `tasks` | `title` varchar(500) + PG `CHECK (length(trim(title)) > 0)`; `status` enum `TODO`/`IN_PROGRESS`/`DONE`; `assignee_id` set to NULL when the developer is deleted; `parent_id` → `tasks` (subtasks are deleted with their parent); `position` orders siblings |
 | `task_skills` | PK (`task_id`, `skill_id`); cascades with the task, restricted for skills |
 
 - Primary keys are UUIDs generated by Prisma (`@default(uuid())`), so the same schema works on SQLite and PostgreSQL.
-- Indexes: `idx_tasks_assignee_id`, `idx_task_skills_skill`, `idx_dev_skills_skill` (the composite PKs already cover lookups by their leading column).
-- Migrations live in `backend/prisma/migrations/` for PostgreSQL only; `init` contains a hand-added CHECK constraint that Prisma cannot express. On SQLite neither the CHECK nor the enum is enforced, so the API validates both.
+- Indexes: `idx_tasks_parent_id`, `idx_tasks_assignee_id`, `idx_task_skills_skill`, `idx_dev_skills_skill` (the composite PKs already cover lookups by their leading column).
+- Migrations live in `backend/prisma/migrations/` for PostgreSQL only and show the schema's evolution: `init` (P1, with a hand-added CHECK constraint that Prisma cannot express) and `add_subtasks` (P4: `parent_id`, its index, `position`). On SQLite neither the CHECK nor the enum is enforced, so the API validates both.
+- `position` is an addition to the original plan: siblings created in one request can share a `created_at` millisecond and their random UUIDs carry no order, so without it 1.1 and 1.2 could swap.
 - Seed (`prisma/seed.ts`) is idempotent: fixed UUIDs (`prisma/seed-data.ts`) + `upsert`, and each seeded developer's skill set is reset to the seed's: Alice [Frontend], Bob [Backend], Carol [Frontend, Backend], Dave [Backend].
 - `PrismaService` is a global singleton built on `createPrismaClient()`; it connects on module init and disconnects on shutdown (`enableShutdownHooks`).
 
@@ -103,30 +125,34 @@ Base path `/api`. Swagger UI is at **http://localhost:3000/api/docs** (OpenAPI J
 | GET | `/health` | | 200 `{status:"ok"}` (DB probed) | 503 |
 | GET | `/skills`, `/skills/:id` | | 200 skill(s) with `developers[]` | 400 bad UUID, 404 |
 | GET | `/developers`, `/developers/:id` | | 200 developer(s) with `skills[]`, `tasks[]` | 400, 404 |
-| GET | `/tasks`, `/tasks/:id` | | 200 `TaskNode` | 400, 404 |
-| POST | `/tasks` | `{ title, skillIds? }` | 201 `TaskNode` (status `TODO`, unassigned) | 400, 422 `UNKNOWN_SKILL`, 429 |
-| PATCH | `/tasks/:id/status` | `{ status, confirmCascade? }` | 200 `{ task, cascadedTaskIds }` | 400, 404 (422/409 rules arrive in P4) |
+| GET | `/tasks` | | 200 `TaskNode[]`: top-level tasks with `subtasks` nested recursively | |
+| GET | `/tasks/:id` | | 200 `TaskNode` with its whole subtree | 400, 404 |
+| POST | `/tasks` | `{ title, skillIds?, subtasks? }` (recursive) | 201 `TaskNode` tree (status `TODO`, unassigned) | 400 (incl. depth > 5 or > 50 tasks), 422 `UNKNOWN_SKILL`, 429 |
+| PATCH | `/tasks/:id/status` | `{ status, confirmCascade? }` | 200 `{ task, cascadedTaskIds }` | 400, 404, 422 `SUBTASKS_NOT_DONE`, 409 `CASCADE_CONFIRMATION_REQUIRED` |
 | PATCH | `/tasks/:id/assignee` | `{ developerId: uuid \| null }` | 200 `TaskNode` | 400, 404, 422 `SKILL_MISMATCH` / `UNKNOWN_DEVELOPER` |
 
-- **Validation:** unknown fields are rejected (so `POST /tasks` cannot set `status` or `assigneeId`). `title` is trimmed and must be 1–500 characters. `skillIds` are UUIDs, deduplicated, at most 20. Path ids must be UUIDs. JSON bodies are limited to 100kb.
-- **Errors:** every error is `application/problem+json` (RFC 7807): `{ type, title, status, detail, instance, code?, errors? }`, plus extensions such as `missingSkills` or `unknownSkillIds`. Responses never contain stack traces, SQL or library messages; 5xx details are generic and the real error is only logged.
+- **Validation:** unknown fields are rejected at every level (so `POST /tasks` cannot set `status`, `assigneeId`, `parentId` or `position`). `title` is trimmed and must be 1–500 characters with no control characters. `skillIds` are UUIDs, deduplicated, at most 20 per task. A tree may be at most 5 levels deep and 50 tasks per request (decision D10). That limit is checked iteratively on the raw JSON before DTO transformation and again in the service, and every route also rejects any JSON nested more than 32 levels, so a deeply nested body is a 400, never a stack overflow. Path ids must be UUIDs. JSON bodies are limited to 100kb.
+- **Errors:** every error is `application/problem+json` (RFC 7807): `{ type, title, status, detail, instance, code?, errors? }`, plus extensions such as `missingSkills`, `unknownSkillIds`, `openSubtasks` or `affectedTasks`. Nested field errors use dotted paths (`subtasks.0.title`). Responses never contain stack traces, SQL or library messages; 5xx details are generic and the real error is only logged.
 - **Rate limits:** a global budget (`THROTTLE_LIMIT` per `THROTTLE_TTL_MS`) plus a stricter one for `POST /tasks` (`THROTTLE_CREATE_TASK_LIMIT`), because creation will call the LLM. `/health` is not throttled.
-- **Until later phases:** `skillSource` is always `USER` (P5), `parentId` is `null` and `subtasks` is `[]` (P4). A task created without skills currently has none and can be assigned to anyone; P5 infers them.
+- **Until P5:** `skillSource` is always `USER`. A task created without skills currently has none and can be assigned to anyone; P5 infers them.
 
 ### Business rules and concurrency
-- **Skill match (decision D3):** a developer can take a task only if their skills include all of the task's skills. Violations return 422 `SKILL_MISMATCH` listing `missingSkills`.
-- Rules form a chain (`runRuleChain`) that returns `allow`, `reject` (→ 422) or `requireConfirmation` (→ 409, used in P4). Rules are plain classes, unit-tested without a database.
-- Status and assignment changes run in one transaction: **lock the task row** (`RowLockStrategy`), read, evaluate rules, write. PostgreSQL uses `SELECT … FOR UPDATE` ordered by id; SQLite needs no row lock because it allows one writer at a time. This is the only place where the two SQL dialects differ.
+- **Skill match (decision D3):** a developer can take a task only if their skills include all of the task's skills. Violations return 422 `SKILL_MISMATCH` listing `missingSkills`. Subtasks follow the same rule (D9) and have their own skills (D8).
+- **Done rule (D4):** a task can be Done only when every descendant at any depth is Done; otherwise 422 `SUBTASKS_NOT_DONE` listing `openSubtasks`.
+- **Cascade rollback (D5):** reopening a Done task whose ancestors are Done returns 409 `CASCADE_CONFIRMATION_REQUIRED` with `affectedTasks` (nearest first) and changes nothing. Resubmitting with `confirmCascade: true` sets the task and moves every Done ancestor to `IN_PROGRESS` in the same transaction, recomputing the affected set rather than trusting the client's. This keeps the invariant "parent Done ⇒ all descendants Done".
+- Rules form a chain (`runRuleChain`) that returns `allow` (optionally with tasks to cascade), `reject` (→ 422) or `requireConfirmation` (→ 409). The service loads the task, its ancestors and its descendants, and the rules are pure functions of that snapshot, unit-tested without a database.
+- **Transactions and locking:** creating a tree is one transaction (Prisma nested create). A status change finds the task's ancestors and descendants with `WITH RECURSIVE` queries, **locks all of those rows** (`RowLockStrategy`), re-reads them, evaluates the rules and writes, all in one transaction. The locked ids can be read before locking because the tree shape never changes after creation (no re-parenting or delete endpoints). PostgreSQL uses `SELECT … FOR UPDATE` ordered by id (consistent lock order, no deadlocks); SQLite needs no row lock because it allows one writer at a time. This is the only place where the two SQL dialects differ. The recursive CTEs are shared: with the `pg` driver adapter, bound parameters are untyped and PostgreSQL infers `uuid`, so no cast is needed.
 
 ## Design patterns
 
 | Pattern | Where | Why |
 |---|---|---|
 | Strategy | `RowLockStrategy` (PG / SQLite) | Keeps the one dialect difference (`FOR UPDATE`) out of business code |
-| Chain of Responsibility | `SkillMatchRule` via `runRuleChain`; status rules slot in P4 | New rules are added without touching the service; each rule is tested alone |
+| Chain of Responsibility | `SkillMatchRule`; `AllDescendantsDoneRule` → `AncestorRollbackRule`, via `runRuleChain` | New rules are added without touching the service; each rule is tested alone; a hard rejection (422) wins over a confirmation request (409) by ordering |
+| Composite | Backend `buildTaskForest` (`TaskNode.subtasks` are `TaskNode`s); frontend `TaskNodeEditor` renders itself per subtask | A task and a tree of tasks are handled the same way, so creation, reading and the editor work at any depth |
 | Facade | `TasksService` | Controllers call one method per use case; transactions, locks, rules and persistence stay hidden |
 
-_Further patterns (Composite, Adapter, Decorator, Strategy for classifiers) arrive in P4–P5._
+_Adapter, Decorator and Strategy for skill classifiers arrive in P5._
 
 ## Dependency choices
 
@@ -145,6 +171,9 @@ _Further patterns (Composite, Adapter, Decorator, Strategy for classifiers) arri
 | `@nestjs/throttler` | In-process rate limiting (global + stricter task creation); no Redis needed for a single instance |
 | ESLint + typescript-eslint + Prettier | Type-aware linting and consistent formatting (replaces the oxlint default of current scaffolds to match CLAUDE.md) |
 | `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh` (frontend, dev) | Catch hook-rule violations and HMR-unsafe exports |
+| `react-router` (frontend) | Client-side routing with route-level code splitting; the standard React router |
+| `@tanstack/react-query` (frontend) | Server-state cache with built-in optimistic-update hooks, rollback and refetching |
+| `tailwindcss`, `@tailwindcss/vite` (frontend, dev) | Utility CSS compiled at build time to a static stylesheet: no runtime CSS-in-JS and no inline styles, which keeps a strict CSP possible |
 | Vitest, React Testing Library, jsdom, `@testing-library/jest-dom`, `@testing-library/user-event` (frontend, dev) | Vite-native test runner; user-centric, accessibility-oriented component tests |
 
 ## Security
@@ -178,6 +207,10 @@ cd ..\frontend; npm run lint; npm test
 
 `test:e2e` / `test:e2e:pg` regenerate the Prisma client for their dialect first, because the generated client is provider-specific. Jest compiles TypeScript through `tsconfig.jest.json` (plain CommonJS) so the Prisma 7 client's dynamic `import()` of its WASM query compiler works inside Jest's sandbox.
 
+Backend tests: unit tests for every rule (incl. "a grandchild still open blocks Done" and the cascade cases), the iterative tree-limit check (also on a 100,000-level input), the forest builder and the rule chain; e2e (SQLite and PostgreSQL) for every endpoint, including creating the 1 / 1.1 / 1.1.1 / 1.1.2 tree in one request, depth 6 / 51 tasks / a ~100kb pathologically deep body → 400, nested field errors, an unknown nested skill writing nothing, and the full cascade: all Done → reopen a leaf without confirmation → 409 with the database unchanged → with confirmation → leaf To-do, both ancestors In Progress, sibling still Done.
+
+Frontend tests (Vitest + React Testing Library, `fetch` mocked) cover: the eligibility rule (Carol qualifies for a Frontend + Backend task, Alice does not), assignee options, the draft reducer (add/remove/update nested nodes, limits, nested server-error mapping), tree flattening and collapse, Done disabled while subtasks are open, the cascade dialog (opens from the cache, Cancel leaves the value and sends nothing, Confirm sends `confirmCascade` and refreshes, a stale-cache 409 opens it with the server's list), the optimistic status change rolling back on a 422, assignment success and rollback, building and saving the wireframe tree with keyboard focus moving to new subtasks, and route-level lazy loading.
+
 ## Roadmap
 Planned for v2, highest priority first. Items tagged with a phase came from that phase's security review.
 
@@ -195,17 +228,19 @@ Planned for v2, highest priority first. Items tagged with a phase came from that
 | Low | Edit task skills, delete tasks, paginate and filter tasks. |
 | Low | Playwright end-to-end tests. |
 | Low | Database triggers as defence in depth for the skill-match rule. |
-| Low | Cascade confirmations carry `expectedAffectedIds`, so the server asks again if the affected set changed. |
+| Low | Cascade confirmations carry `expectedAffectedIds`, so the server asks again if the affected set changed (today `confirmCascade: true` is a blanket yes; flagged again in the P4 review). |
 | Low | [P0] `db-reset.ts`: strip `?query` from `DATABASE_URL`, compare `NODE_ENV` case-insensitively, and call `npx --no-install tsx`. |
 | Low | [P0] Pin the PostgreSQL image by digest, not only by tag. |
 | Low | [P1] The seed upserts skills by `id`; an existing skill with the same name but another id makes it fail (the transaction rolls back, no data loss). Upsert by `name` instead. |
 | Low | [P1] `skills.name` uniqueness is case-sensitive ("Frontend" and "frontend" could coexist); normalise skill names in the application before P5. |
-| Low | [P1] `@updatedAt` only applies to writes made through Prisma Client; raw-SQL updates must set `updated_at` explicitly. |
 | Low | [P1] Seed errors print the full message, which may include the DB host or name (never the password); print only the error code in CI. |
 | Low | [P2] Nest turns `URIError` and unmatched routes into messages that echo the raw path; return a fixed message per status instead. |
 | Low | [P2] Interactive transactions use Prisma's defaults (`maxWait` 2s, `timeout` 5s); under heavy contention the timeout (P2028) becomes a 500. Map it to 503 with `Retry-After` or set explicit limits. |
 | Low | [P2] `/api/health` is not rate limited and queries the DB on each call; restrict it to the internal network in P6. |
 | Low | [P2] Add an e2e test for concurrent PATCHes on the same task (verifies `FOR UPDATE` serialisation). |
+| Low | [P4] The 422 `openSubtasks` and 409 `affectedTasks` responses include other tasks' titles. Fine in v1 (no auth; `GET /tasks` already shows every title), but they must be filtered by visibility once authentication exists. |
+| Low | [P4] `npm audit --omit=dev` (backend) reports 2 moderate js-yaml advisories via `@nestjs/swagger`; no High/Critical. Re-check in P7. |
+| Low | [P3] The frontend `fetch` ignores TanStack Query's abort `signal` and has no timeout, so `cancelQueries` doesn't abort in-flight requests and a hung `/api` keeps the page loading. Pass the `signal` combined with `AbortSignal.timeout(...)`. |
 
 Accepted by design: on SQLite the `status` enum is unconstrained TEXT and the title CHECK constraint does not exist, so the API validates both itself.
 

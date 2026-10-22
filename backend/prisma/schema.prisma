@@ -57,11 +57,18 @@ model Task {
   status     TaskStatus  @default(TODO)
   assigneeId String?     @map("assignee_id") @db.Uuid
   assignee   Developer?  @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+  parentId   String?     @map("parent_id") @db.Uuid
+  parent     Task?       @relation("TaskTree", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks   Task[]      @relation("TaskTree")
+  // Sibling order (1.1 before 1.2). Siblings are created in one request and can
+  // share created_at, and their random UUIDs carry no order.
+  position   Int         @default(0)
   skills     TaskSkill[]
   createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([assigneeId], map: "idx_tasks_assignee_id")
+  @@index([parentId], map: "idx_tasks_parent_id")
   @@map("tasks")
 }
 

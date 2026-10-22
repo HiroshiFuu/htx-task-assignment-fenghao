@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -8,7 +8,9 @@ import {
   IsUUID,
   Length,
   Matches,
+  ValidateNested,
 } from 'class-validator';
+import { MAX_TREE_DEPTH, MAX_TREE_NODES } from '../tree-limits';
 
 export const TITLE_MAX_LENGTH = 500;
 export const MAX_SKILLS_PER_TASK = 20;
@@ -62,4 +64,15 @@ export class CreateTaskDto {
   @ArrayMaxSize(MAX_SKILLS_PER_TASK)
   @IsUUID('all', { each: true })
   skillIds?: string[];
+
+  @ApiPropertyOptional({
+    type: () => [CreateTaskDto],
+    description: `Nested subtasks (Composite). At most ${String(MAX_TREE_DEPTH)} levels including this task and ${String(MAX_TREE_NODES)} tasks per request. Each subtask has its own skills (decision D8).`,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_TREE_NODES)
+  @ValidateNested({ each: true })
+  @Type(() => CreateTaskDto)
+  subtasks?: CreateTaskDto[];
 }

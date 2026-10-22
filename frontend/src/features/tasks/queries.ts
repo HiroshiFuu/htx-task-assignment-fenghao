@@ -37,18 +37,40 @@ export function useCreateTask() {
   });
 }
 
+function findTask(
+  forest: readonly TaskNode[] | undefined,
+  id: string,
+): TaskNode | undefined {
+  for (const task of forest ?? []) {
+    if (task.id === id) return task;
+    const found = findTask(task.subtasks, id);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** Replaces one task's own fields anywhere in the forest, keeping current subtasks. */
+function patchTask(
+  forest: TaskNode[] | undefined,
+  id: string,
+  patch: (task: TaskNode) => TaskNode,
+): TaskNode[] | undefined {
+  return forest?.map((task) =>
+    task.id === id
+      ? { ...patch(task), subtasks: task.subtasks }
+      : { ...task, subtasks: patchTask(task.subtasks, id, patch) ?? [] },
+  );
+}
+
 interface OptimisticSnapshot {
   previousTask: TaskNode | undefined;
 }
 
-function replaceTask(tasks: TaskNode[] | undefined, next: TaskNode) {
-  return tasks?.map((task) => (task.id === next.id ? next : task));
-}
-
 /**
  * Shared optimistic-update flow: patch the cached task immediately, restore only
- * that task if the server rejects the change (other rows may hold their own
- * optimistic edits), and refetch either way so the list ends up matching the server.
+ * that task's own fields if the server rejects the change (other rows may hold
+ * their own optimistic edits), and refetch either way so the list ends up matching
+ * the server.
  */
 function useOptimisticTaskMutation<
   Variables extends { taskId: string },
@@ -63,21 +85,22 @@ function useOptimisticTaskMutation<
     mutationFn,
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
-      const previousTask = queryClient
-        .getQueryData<TaskNode[]>(queryKeys.tasks)
-        ?.find((task) => task.id === variables.taskId);
-      if (previousTask) {
-        queryClient.setQueryData<TaskNode[]>(queryKeys.tasks, (tasks) =>
-          replaceTask(tasks, applyToTask(previousTask, variables)),
-        );
-      }
+      const previousTask = findTask(
+        queryClient.getQueryData<TaskNode[]>(queryKeys.tasks),
+        variables.taskId,
+      );
+      queryClient.setQueryData<TaskNode[]>(queryKeys.tasks, (tasks) =>
+        patchTask(tasks, variables.taskId, (task) =>
+          applyToTask(task, variables),
+        ),
+      );
       return { previousTask };
     },
-    onError: (_error, _variables, snapshot) => {
+    onError: (_error, variables, snapshot) => {
       const previousTask = snapshot?.previousTask;
       if (previousTask) {
         queryClient.setQueryData<TaskNode[]>(queryKeys.tasks, (tasks) =>
-          replaceTask(tasks, previousTask),
+          patchTask(tasks, variables.taskId, () => previousTask),
         );
       }
     },
@@ -104,6 +127,23 @@ export function useUpdateTaskStatus() {
     // A developer's task summaries include status.
     [queryKeys.developers],
   );
+}
+
+/**
+ * Decision D5: a confirmed cascade changes several tasks at once, so it is not
+ * applied optimistically; the whole tree is refetched once the server confirms.
+ */
+export function useConfirmedCascadeStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, status }: UpdateStatusVariables) =>
+      api.updateTaskStatus(taskId, status, true),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.developers }),
+      ]),
+  });
 }
 
 export interface UpdateAssigneeVariables {

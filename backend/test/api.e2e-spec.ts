@@ -76,6 +76,41 @@ describe('API platform, skills and developers (e2e)', () => {
       expectProblem(response, 415);
     });
 
+    it.each([
+      ['a deep unknown field on POST /api/tasks', 'post', '/api/tasks', 'foo'],
+      [
+        'object-shaped subtasks on POST /api/tasks',
+        'post',
+        '/api/tasks',
+        'subtasks',
+      ],
+      [
+        'a deep field on PATCH assignee',
+        'patch',
+        `/api/tasks/${UNKNOWN_ID}/assignee`,
+        'developerId',
+      ],
+    ] as const)(
+      'rejects %s nested beyond 32 levels with 400, not a stack overflow',
+      async (_label, method, path, key) => {
+        const depth = 4000;
+        const body =
+          `{"title":"x","${key}":` +
+          '{"x":'.repeat(depth) +
+          '1' +
+          '}'.repeat(depth) +
+          '}';
+        const response = await request(http)
+          [method](path)
+          .set('Content-Type', 'application/json')
+          .send(body);
+        expectProblem(response, 400);
+        expect((response.body as { detail: string }).detail).toBe(
+          'Request body is nested too deeply.',
+        );
+      },
+    );
+
     it('rejects bodies over 100kb with 413', async () => {
       const response = await request(http)
         .post('/api/tasks')

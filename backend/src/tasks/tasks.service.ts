@@ -7,6 +7,7 @@ import {
 import { DbClient } from '../common/prisma/db-client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RowLockStrategy } from '../common/prisma/row-lock.strategy';
+import { ValidationProblemException } from '../common/problem-details/validation-problem.exception';
 import { DevelopersRepository } from '../developers/developers.repository';
 import { SkillsRepository } from '../skills/skills.repository';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -19,8 +20,19 @@ import {
   STATUS_TRANSITION_RULES,
   StatusTransitionRule,
 } from './rules/status-transition-rule';
-import { toTaskNode } from './task.mapper';
-import { TaskRow, TasksRepository } from './tasks.repository';
+import { buildTaskForest } from './task.mapper';
+import { TasksRepository } from './tasks.repository';
+import { checkTreeLimits } from './tree-limits';
+
+function collectSkillIds(dto: CreateTaskDto): string[] {
+  const ids = new Set<string>();
+  const stack = [dto];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    node.skillIds?.forEach((id) => ids.add(id));
+    stack.push(...(node.subtasks ?? []));
+  }
+  return [...ids];
+}
 
 /**
  * Facade: the controller sees one method per use case; transactions, locking,
@@ -41,50 +53,84 @@ export class TasksService {
   ) {}
 
   async list(): Promise<TaskNodeDto[]> {
-    return (await this.tasks.findAll()).map(toTaskNode);
+    return buildTaskForest(await this.tasks.findAll());
   }
 
-  async get(id: string): Promise<TaskNodeDto> {
-    const row = await this.tasks.findById(id);
-    if (!row) {
+  /** The task with its whole subtree. */
+  async get(
+    id: string,
+    db: DbClient = this.prisma.client,
+  ): Promise<TaskNodeDto> {
+    const root = await this.tasks.findRef(id, db);
+    if (!root) {
       throw new ResourceNotFound('Task', id);
     }
-    return toTaskNode(row);
+    const descendants = await this.tasks.findDescendants(id, db);
+    const rows = await this.tasks.findByIds(
+      [id, ...descendants.map((d) => d.id)],
+      db,
+    );
+    const [tree] = buildTaskForest(rows);
+    return tree;
   }
 
+  /** Validates every skill in the tree, then writes the whole tree in one transaction. */
   async create(dto: CreateTaskDto): Promise<TaskNodeDto> {
-    const skillIds = dto.skillIds ?? [];
-    const row = await this.prisma.client.$transaction(async (tx) => {
-      await this.assertSkillsExist(skillIds, tx);
-      return this.tasks.create({ title: dto.title, skillIds }, tx);
+    // Also enforced by TreeLimitsMiddleware; re-checked here so the limit holds
+    // even if that route binding changes (the DTO alone allows 50 per level).
+    const violation = checkTreeLimits(dto);
+    if (violation) {
+      throw new ValidationProblemException([
+        { field: violation.field, messages: [violation.message] },
+      ]);
+    }
+    return this.prisma.client.$transaction(async (tx) => {
+      await this.assertSkillsExist(collectSkillIds(dto), tx);
+      const rootId = await this.tasks.createTree(dto, tx);
+      return this.get(rootId, tx);
     });
-    return toTaskNode(row);
   }
 
   async updateStatus(
     id: string,
     dto: UpdateTaskStatusDto,
   ): Promise<UpdateTaskStatusResultDto> {
-    const row = await this.prisma.client.$transaction(async (tx) => {
-      const task = await this.lockAndLoad(id, tx);
-      const verdict = await runRuleChain(this.statusRules, {
-        tx,
-        task,
-        targetStatus: dto.status,
-        confirmCascade: dto.confirmCascade ?? false,
-      });
-      throwIfBlocked(verdict);
-      return this.tasks.updateStatus(id, dto.status, tx);
-    });
-    return { task: toTaskNode(row), cascadedTaskIds: [] };
+    const cascadedTaskIds = await this.prisma.client.$transaction(
+      async (tx) => {
+        await this.lockFamily(id, tx);
+        // Re-read after locking so the rules see the state the writes apply to.
+        const task = await this.tasks.findRef(id, tx);
+        if (!task) {
+          throw new ResourceNotFound('Task', id);
+        }
+        const verdict = await runRuleChain(this.statusRules, {
+          task,
+          descendants: await this.tasks.findDescendants(id, tx),
+          ancestors: await this.tasks.findAncestors(id, tx),
+          targetStatus: dto.status,
+          confirmCascade: dto.confirmCascade ?? false,
+        });
+        const cascade = allowedCascade(verdict);
+        await this.tasks.updateStatus(id, dto.status, tx);
+        if (cascade.length > 0) {
+          await this.tasks.rollBackToInProgress(cascade, tx);
+        }
+        return cascade;
+      },
+    );
+    return { task: await this.get(id), cascadedTaskIds: [...cascadedTaskIds] };
   }
 
   async updateAssignee(
     id: string,
     { developerId }: UpdateTaskAssigneeDto,
   ): Promise<TaskNodeDto> {
-    const row = await this.prisma.client.$transaction(async (tx) => {
-      const task = await this.lockAndLoad(id, tx);
+    await this.prisma.client.$transaction(async (tx) => {
+      await this.rowLock.lockTasks(tx, [id]);
+      const task = await this.tasks.findById(id, tx);
+      if (!task) {
+        throw new ResourceNotFound('Task', id);
+      }
       if (developerId !== null) {
         const developer = await this.developers.findForAssignment(
           developerId,
@@ -96,25 +142,34 @@ export class TasksService {
             `Developer ${developerId} does not exist.`,
           );
         }
-        const verdict = await runRuleChain(this.assignmentRules, {
-          task: { id: task.id, skills: task.skills.map(({ skill }) => skill) },
-          developer,
-        });
-        throwIfBlocked(verdict);
+        allowedCascade(
+          await runRuleChain(this.assignmentRules, {
+            task: {
+              id: task.id,
+              skills: task.skills.map(({ skill }) => skill),
+            },
+            developer,
+          }),
+        );
       }
-      return this.tasks.updateAssignee(id, developerId, tx);
+      await this.tasks.updateAssignee(id, developerId, tx);
     });
-    return toTaskNode(row);
+    return this.get(id);
   }
 
-  /** Lock first, then read, so rule checks see the state the write will apply to. */
-  private async lockAndLoad(id: string, tx: DbClient): Promise<TaskRow> {
-    await this.rowLock.lockTasks(tx, [id]);
-    const task = await this.tasks.findById(id, tx);
-    if (!task) {
-      throw new ResourceNotFound('Task', id);
-    }
-    return task;
+  /**
+   * Locks the task, its ancestors and its descendants. The tree shape never changes
+   * after creation (no re-parenting or deletes), so the ids read here stay valid.
+   */
+  private async lockFamily(id: string, tx: DbClient): Promise<void> {
+    // Sequential: an interactive transaction owns a single connection.
+    const ancestors = await this.tasks.findAncestors(id, tx);
+    const descendants = await this.tasks.findDescendants(id, tx);
+    await this.rowLock.lockTasks(tx, [
+      id,
+      ...ancestors.map((t) => t.id),
+      ...descendants.map((t) => t.id),
+    ]);
   }
 
   private async assertSkillsExist(
@@ -138,10 +193,11 @@ export class TasksService {
   }
 }
 
-function throwIfBlocked(verdict: RuleResult): void {
+/** Throws for a blocking verdict; otherwise returns the ids the rules asked to cascade. */
+function allowedCascade(verdict: RuleResult): readonly string[] {
   switch (verdict.kind) {
     case 'allow':
-      return;
+      return verdict.cascadeTaskIds ?? [];
     case 'reject':
       throw new BusinessRuleViolation(
         verdict.code,

@@ -1,9 +1,16 @@
-import type { FieldError, ProblemDetails } from './types';
+import {
+  TASK_STATUSES,
+  type FieldError,
+  type ProblemDetails,
+  type TaskSummary,
+} from './types';
 
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
   readonly fieldErrors: FieldError[];
+  /** The full problem body, including extension members such as `affectedTasks`. */
+  readonly problem: ProblemDetails;
 
   constructor(problem: ProblemDetails) {
     super(problem.detail);
@@ -11,7 +18,34 @@ export class ApiError extends Error {
     this.status = problem.status;
     this.code = problem.code;
     this.fieldErrors = problem.errors ?? [];
+    this.problem = problem;
   }
+}
+
+function isTaskSummary(value: unknown): value is TaskSummary {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<TaskSummary>;
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.title === 'string' &&
+    TASK_STATUSES.some((status) => status === candidate.status)
+  );
+}
+
+/** The ancestors a 409 CASCADE_CONFIRMATION_REQUIRED would roll back, if that is what this is. */
+export function cascadeAffectedTasks(error: unknown): TaskSummary[] | null {
+  if (
+    !(error instanceof ApiError) ||
+    error.code !== 'CASCADE_CONFIRMATION_REQUIRED'
+  ) {
+    return null;
+  }
+  const affected = error.problem.affectedTasks;
+  return Array.isArray(affected) && affected.every(isTaskSummary)
+    ? affected
+    : null;
 }
 
 const NETWORK_PROBLEM: ProblemDetails = {
