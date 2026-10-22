@@ -1,0 +1,12 @@
+{
+  // Jest only: compile to plain CommonJS so the Prisma 7 client's dynamic import()
+  // of its WASM query compiler becomes require(); Jest's VM rejects dynamic import()
+  // without --experimental-vm-modules.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node10",
+    "resolvePackageJsonExports": false,
+    "ignoreDeprecations": "5.0"
+  }
+}
