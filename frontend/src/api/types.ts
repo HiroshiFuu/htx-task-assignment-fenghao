@@ -47,6 +47,7 @@ export interface TaskNode {
 export interface CreateTaskInput {
   title: string;
   skillIds?: string[];
+  subtasks?: CreateTaskInput[];
 }
 
 export interface UpdateStatusResult {
@@ -59,7 +60,7 @@ export interface FieldError {
   messages: string[];
 }
 
-/** RFC 7807 body returned by every API error. */
+/** RFC 7807 body returned by every API error, plus extension members. */
 export interface ProblemDetails {
   type: string;
   title: string;
@@ -67,4 +68,5 @@ export interface ProblemDetails {
   detail: string;
   code?: string;
   errors?: FieldError[];
+  [extension: string]: unknown;
 }

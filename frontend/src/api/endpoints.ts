@@ -19,10 +19,10 @@ export const api = {
   createTask: (input: CreateTaskInput) =>
     apiRequest<TaskNode>('/tasks', { method: 'POST', body: input }),
 
-  updateTaskStatus: (id: string, status: TaskStatus) =>
+  updateTaskStatus: (id: string, status: TaskStatus, confirmCascade = false) =>
     apiRequest<UpdateStatusResult>(taskPath(id, '/status'), {
       method: 'PATCH',
-      body: { status },
+      body: confirmCascade ? { status, confirmCascade } : { status },
     }),
 
   updateTaskAssignee: (id: string, developerId: string | null) =>
