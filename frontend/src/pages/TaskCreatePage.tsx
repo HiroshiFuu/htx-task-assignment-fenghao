@@ -1,43 +1,45 @@
-import { useId, useReducer, useRef, type SubmitEvent } from 'react';
+import { useReducer, type SubmitEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { ApiError, errorMessage } from '../api/client';
-import { LiveRegion } from '../components/LiveRegion';
+import { LiveRegion, type Feedback } from '../components/LiveRegion';
 import { primaryButtonClass, secondaryButtonClass } from '../components/styles';
+import { TaskNodeEditor } from '../features/tasks/components/TaskNodeEditor';
 import { useCreateTask, useSkills } from '../features/tasks/queries';
 import {
-  initialTaskFormState,
-  taskFormReducer,
-  TITLE_MAX_LENGTH,
+  countNodes,
+  draftReducer,
+  initialDraftState,
+  MAX_DEPTH,
+  MAX_NODES,
+  titleInputId,
   toCreateTaskInput,
-  validateTaskForm,
-} from '../features/tasks/task-form';
+  validateDraft,
+} from '../features/tasks/task-draft';
+
+const focusTitle = (key: string) => {
+  document.getElementById(titleInputId(key))?.focus();
+};
 
 export default function TaskCreatePage() {
-  const [state, dispatch] = useReducer(taskFormReducer, initialTaskFormState);
+  const [state, dispatch] = useReducer(draftReducer, undefined, () =>
+    initialDraftState(crypto.randomUUID()),
+  );
   const skills = useSkills();
   const createTask = useCreateTask();
   const navigate = useNavigate();
-  const titleRef = useRef<HTMLInputElement>(null);
-  const titleId = useId();
-  const titleErrorId = useId();
-  const skillsHintId = useId();
-  const skillsErrorId = useId();
 
-  const clientErrors = validateTaskForm(state);
-  const titleError =
-    state.serverErrors.title ??
-    (state.submitAttempted ? clientErrors.title : undefined);
-  const skillsError = state.serverErrors.skillIds;
+  const clientErrors = validateDraft(state.root);
+  const total = countNodes(state.root);
 
   // Field-level server errors are shown next to their field instead.
-  const submitError =
-    createTask.error &&
-    !(
-      createTask.error instanceof ApiError &&
-      createTask.error.fieldErrors.length > 0
-    )
+  const isFieldError =
+    createTask.error instanceof ApiError &&
+    createTask.error.fieldErrors.length > 0;
+  const feedback: Feedback | null = state.treeError
+    ? { kind: 'error', message: state.treeError }
+    : createTask.error && !isFieldError
       ? {
-          kind: 'error' as const,
+          kind: 'error',
           message: `Could not create the task: ${errorMessage(createTask.error)}`,
         }
       : null;
@@ -45,112 +47,71 @@ export default function TaskCreatePage() {
   const handleSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     dispatch({ type: 'SUBMIT_ATTEMPTED' });
-    if (clientErrors.title) {
-      titleRef.current?.focus();
+    const [firstInvalid] = clientErrors.keys();
+    if (firstInvalid) {
+      focusTitle(firstInvalid);
       return;
     }
-    createTask.mutate(toCreateTaskInput(state), {
+    createTask.mutate(toCreateTaskInput(state.root), {
       onSuccess: (task) => {
         void navigate('/', { state: { flash: `Created "${task.title}".` } });
       },
       onError: (error) => {
         if (error instanceof ApiError && error.fieldErrors.length > 0) {
           dispatch({ type: 'SERVER_FIELD_ERRORS', errors: error.fieldErrors });
-          titleRef.current?.focus();
         }
       },
     });
   };
 
   return (
-    <section aria-labelledby="create-heading" className="max-w-2xl space-y-4">
-      <h1 id="create-heading" className="text-2xl font-semibold">
-        New task
-      </h1>
+    <section aria-labelledby="create-heading" className="max-w-3xl space-y-4">
+      <div className="space-y-1">
+        <h1 id="create-heading" className="text-2xl font-semibold">
+          New task
+        </h1>
+        <p className="text-sm text-slate-600">
+          Add subtasks to break the work down (up to {MAX_DEPTH} levels and{' '}
+          {MAX_NODES} tasks). Only developers with all of a task&rsquo;s skills
+          can be assigned to it.
+        </p>
+      </div>
 
-      <LiveRegion feedback={submitError} />
+      <LiveRegion feedback={feedback} />
 
       <form
         noValidate
         onSubmit={handleSubmit}
         className="space-y-6 rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-6"
       >
-        <div className="space-y-1">
-          <label htmlFor={titleId} className="block text-sm font-medium">
-            Title <span aria-hidden="true">*</span>
-          </label>
-          <input
-            ref={titleRef}
-            id={titleId}
-            name="title"
-            type="text"
-            value={state.title}
-            maxLength={TITLE_MAX_LENGTH}
-            aria-required="true"
-            aria-invalid={titleError ? true : undefined}
-            aria-describedby={titleError ? titleErrorId : undefined}
-            onChange={(event) => {
-              dispatch({ type: 'SET_TITLE', title: event.target.value });
-            }}
-            className="block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 aria-invalid:border-red-500 aria-invalid:focus-visible:ring-red-500"
-          />
-          {titleError && (
-            <p id={titleErrorId} className="text-sm text-red-700">
-              {titleError}
-            </p>
-          )}
-        </div>
-
-        <fieldset
-          aria-describedby={
-            skillsError ? `${skillsHintId} ${skillsErrorId}` : skillsHintId
-          }
-          className="space-y-2"
-        >
-          <legend className="text-sm font-medium">Required skills</legend>
-          <p id={skillsHintId} className="text-sm text-slate-500">
-            Optional. Only developers with all selected skills can be assigned.
+        {skills.isError ? (
+          <p className="text-sm text-red-700">
+            Could not load skills: {errorMessage(skills.error)}
           </p>
-          {skills.isPending ? (
-            <p className="text-sm text-slate-500">Loading skills…</p>
-          ) : skills.isError ? (
-            <p className="text-sm text-red-700">
-              Could not load skills: {errorMessage(skills.error)}
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-4">
-              {skills.data.map((skill) => (
-                <label
-                  key={skill.id}
-                  className="inline-flex items-center gap-2 text-sm"
-                >
-                  <input
-                    type="checkbox"
-                    checked={state.skillIds.includes(skill.id)}
-                    onChange={() => {
-                      dispatch({ type: 'TOGGLE_SKILL', skillId: skill.id });
-                    }}
-                    className="size-4 rounded border-slate-300 text-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500"
-                  />
-                  {skill.name}
-                </label>
-              ))}
-            </div>
-          )}
-          {skillsError && (
-            <p id={skillsErrorId} className="text-sm text-red-700">
-              {skillsError}
-            </p>
-          )}
-        </fieldset>
+        ) : skills.isPending ? (
+          <p className="text-sm text-slate-500">Loading skills…</p>
+        ) : (
+          <TaskNodeEditor
+            node={state.root}
+            path={[]}
+            state={state}
+            clientErrors={clientErrors}
+            skills={skills.data}
+            dispatch={dispatch}
+          />
+        )}
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
           <button
             type="submit"
-            disabled={createTask.isPending}
+            disabled={createTask.isPending || skills.isPending}
             className={primaryButtonClass}
           >
-            {createTask.isPending ? 'Saving…' : 'Save task'}
+            {createTask.isPending
+              ? 'Saving…'
+              : total > 1
+                ? `Save ${String(total)} tasks`
+                : 'Save task'}
           </button>
           <Link to="/" className={secondaryButtonClass}>
             Cancel
