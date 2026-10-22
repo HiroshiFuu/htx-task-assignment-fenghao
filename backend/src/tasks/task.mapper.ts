@@ -2,7 +2,7 @@ import { byName } from '../common/dto/summaries.dto';
 import { TaskNodeDto } from './dto/task-node.dto';
 import type { TaskRow } from './tasks.repository';
 
-export function toTaskNode(row: TaskRow): TaskNodeDto {
+function toTaskNode(row: TaskRow): TaskNodeDto {
   return {
     id: row.id,
     title: row.title,
@@ -13,10 +13,29 @@ export function toTaskNode(row: TaskRow): TaskNodeDto {
     // Persisted from Phase P5 (skill_source column); user-supplied until then.
     skillSource: 'USER',
     assignee: row.assignee,
-    // Persisted from Phase P4 (parent_id column); every task is top-level until then.
-    parentId: null,
+    parentId: row.parentId,
     subtasks: [],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Composite: assembles flat rows (already in tree order) into nodes whose
+ * `subtasks` are nodes themselves. A row whose parent is not in the set is a root,
+ * so the same function serves the full forest and a single subtree.
+ */
+export function buildTaskForest(rows: readonly TaskRow[]): TaskNodeDto[] {
+  const nodes = new Map(rows.map((row) => [row.id, toTaskNode(row)]));
+  const roots: TaskNodeDto[] = [];
+  for (const row of rows) {
+    const node = nodes.get(row.id) as TaskNodeDto;
+    const parent = row.parentId ? nodes.get(row.parentId) : undefined;
+    if (parent) {
+      parent.subtasks.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
 }
