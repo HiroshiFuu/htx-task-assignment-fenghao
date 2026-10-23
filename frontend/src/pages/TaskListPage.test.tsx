@@ -86,7 +86,7 @@ describe('TaskListPage', () => {
     await waitFor(() => {
       expect(status).toHaveValue('TODO');
     });
-    expect(screen.getByRole('status')).toHaveTextContent(
+    expect(screen.getByRole('alert')).toHaveTextContent(
       `Could not change the status of "${TITLE}": Not all subtasks are done.`,
     );
   });

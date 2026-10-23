@@ -1,7 +1,21 @@
 @import 'tailwindcss';
 
+@theme {
+  --animate-toast-in: toast-in 180ms ease-out;
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
 @layer base {
-  /* Keeps focused controls and anchor targets clear of the sticky header. */
   html {
     scroll-padding-top: 5rem;
   }

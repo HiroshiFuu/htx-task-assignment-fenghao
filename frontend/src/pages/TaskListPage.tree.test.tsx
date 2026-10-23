@@ -98,18 +98,22 @@ describe('TaskListPage tree', () => {
     ).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('disables Done while a subtask at any depth is open', async () => {
+  it('locks Done while a subtask at any depth is open, and says why', async () => {
     serve(() => [
-      tree({ root: 'TODO', child: 'DONE', leafA: 'DONE', leafB: 'TODO' }),
+      tree({ root: 'TODO', child: 'TODO', leafA: 'DONE', leafB: 'TODO' }),
     ]);
     renderWithProviders(<TaskListPage />);
 
     const rootStatus = await statusOf('Profile');
     expect(
-      within(rootStatus).getByRole('option', { name: 'Done' }),
+      within(rootStatus).getByRole('option', { name: 'Done (locked)' }),
     ).toBeDisabled();
+    // Visible, and linked to the select for screen readers.
     expect(rootStatus).toHaveAccessibleDescription(
-      'Done is unavailable until all subtasks are done or cancelled.',
+      'Done locked: 2 subtasks still open.',
+    );
+    expect(await statusOf('API')).toHaveAccessibleDescription(
+      'Done locked: 1 subtask still open.',
     );
     expect(
       within(await statusOf('Upload')).getByRole('option', { name: 'Done' }),
@@ -153,7 +157,7 @@ describe('TaskListPage tree', () => {
     expect(requests.filter((r) => r.method === 'PATCH')).toHaveLength(0);
   });
 
-  it('moves a Done subtask to Cancelled without asking (it stays closed)', async () => {
+  it('moves a Done subtask to Cancelled without asking, with a red toast', async () => {
     const { requests } = serve(
       () => [tree(ALL_DONE)],
       () => jsonResponse({ task: makeTask(), cascadedTaskIds: [] }),
@@ -173,6 +177,9 @@ describe('TaskListPage tree', () => {
         },
       ]);
     });
+    const toast = (await screen.findByText('"Upload" is now Cancelled.'))
+      .parentElement;
+    expect(toast).toHaveClass('bg-red-600');
   });
 
   it('asks before reopening a subtask of Done parents, and Cancel changes nothing', async () => {
