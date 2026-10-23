@@ -20,10 +20,24 @@ export function isSwaggerEnabled(): boolean {
 }
 
 /**
+ * Number of reverse proxies in front of the API (1 behind the nginx container).
+ * Rate limiting keys on req.ip, which must be the client, not the proxy. Default 0:
+ * trusting X-Forwarded-For without a proxy would let clients spoof their IP.
+ */
+export function trustedProxyHops(): number {
+  const hops = Number.parseInt(process.env.TRUST_PROXY_HOPS ?? '', 10);
+  return Number.isInteger(hops) && hops > 0 ? hops : 0;
+}
+
+/**
  * Shared by main.ts and the e2e tests so tests exercise the exact production
  * pipeline (prefix, security headers, body limit, validation, error format).
  */
 export function configureApp(app: NestExpressApplication): void {
+  const hops = trustedProxyHops();
+  if (hops > 0) {
+    app.set('trust proxy', hops);
+  }
   app.setGlobalPrefix(API_PREFIX);
   app.use(helmet());
   app.useBodyParser('json', { limit: '100kb' });
