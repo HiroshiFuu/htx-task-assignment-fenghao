@@ -95,6 +95,8 @@ export const SEED_TASKS: readonly SeedTask[] = [
       ]),
       task(5, 'Design the profile page', 'DONE', [FRONTEND], ALICE, [
         task(6, 'Make the profile page responsive', 'DONE', [FRONTEND], ALICE),
+        // Cancelled work doesn't block its Done parent (decision D15).
+        task(9, 'Add an animated avatar picker', 'CANCELLED', [FRONTEND], null),
       ]),
     ],
   ),

@@ -1,7 +1,12 @@
 // Mirrors the backend DTOs (see Swagger at /api/docs). Hand-written for v1;
 // generating them from OpenAPI is on the roadmap.
 
-export const TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'DONE'] as const;
+export const TASK_STATUSES = [
+  'TODO',
+  'IN_PROGRESS',
+  'DONE',
+  'CANCELLED',
+] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export type SkillSource = 'USER' | 'LLM' | 'FALLBACK';

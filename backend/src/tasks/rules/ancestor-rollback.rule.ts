@@ -4,12 +4,13 @@ import {
   StatusTransitionContext,
   StatusTransitionRule,
 } from './status-transition-rule';
+import { isClosed } from './task-status';
 
 /**
- * Decision D5: reopening a Done task would leave Done ancestors with an open
- * descendant, so they are rolled back to IN_PROGRESS, but only after the client
- * confirms. Because "parent Done ⇒ all descendants Done", this only arises when the
- * task itself leaves DONE.
+ * Decision D5: reopening a closed (Done or Cancelled) task would leave Done ancestors
+ * with an open descendant, so they are rolled back to IN_PROGRESS, but only after
+ * the client confirms. Because "a Done task has only closed descendants", this only
+ * arises when the task goes from closed to open; Done ↔ Cancelled needs no cascade.
  */
 export class AncestorRollbackRule implements StatusTransitionRule {
   evaluate({
@@ -18,7 +19,7 @@ export class AncestorRollbackRule implements StatusTransitionRule {
     targetStatus,
     confirmCascade,
   }: StatusTransitionContext): RuleResult {
-    if (task.status !== TaskStatus.DONE || targetStatus === TaskStatus.DONE) {
+    if (!isClosed(task.status) || isClosed(targetStatus)) {
       return ALLOW;
     }
     const doneAncestors = ancestors.filter(

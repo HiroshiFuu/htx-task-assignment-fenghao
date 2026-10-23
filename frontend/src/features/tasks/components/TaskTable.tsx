@@ -88,7 +88,8 @@ export function TaskTable({ tasks, developers, onFeedback }: TaskTableProps) {
                     )
                   )}
                   <span
-                    className={`break-words ${depth === 0 ? 'font-medium' : ''}`}
+                    // The status select still says "Cancelled" for screen readers.
+                    className={`break-words ${depth === 0 ? 'font-medium' : ''} ${task.status === 'CANCELLED' ? 'text-slate-400 line-through' : ''}`}
                   >
                     {task.title}
                   </span>

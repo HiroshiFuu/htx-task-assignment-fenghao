@@ -16,6 +16,7 @@ enum TaskStatus {
   TODO
   IN_PROGRESS
   DONE
+  CANCELLED
 
   @@map("task_status")
 }
