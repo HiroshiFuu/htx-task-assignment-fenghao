@@ -5,6 +5,8 @@ A full-stack app for assigning development tasks: **developers** have **skills**
 **Contents:**
 [1. Overview](#1-overview) · [2. Quick start](#2-quick-start) · [3. Configuration](#3-configuration) · [4. System design](#4-system-design) · [5. API](#5-api) · [6. Design patterns](#6-design-patterns) · [7. Dependency choices](#7-dependency-choices) · [8. Security](#8-security) · [9. Assumptions and decisions](#9-assumptions-and-decisions) · [10. Testing](#10-testing) · [11. Roadmap](#11-roadmap) · [12. AI-assisted development](#12-ai-assisted-development)
 
+**Reviewing?** Start with [Quick start](#2-quick-start); everything runs without an API key. [AGENTS.md](AGENTS.md) maps each requirement to its code and tests and lists the verification commands (they work in bash and PowerShell, with or without Docker).
+
 ---
 
 ## 1. Overview
@@ -18,6 +20,7 @@ A full-stack app for assigning development tasks: **developers** have **skills**
 - **Skill-matched assignment:** the assignee list only offers developers whose skills cover the task, and the API enforces the same rule.
 - **Subtasks of any depth** (up to 5 levels / 50 tasks per request): created in one go with a recursive editor (1 / 1.1 / 1.1.1 …).
 - **"Done" means done:** a task can be Done only when every subtask at any depth is Done or **Cancelled**. Reopening a Done or Cancelled subtask under a Done parent asks for confirmation, then moves those parents back to In Progress.
+- **Clear feedback:** colour-coded status selects, a visible hint when Done is locked by open subtasks, toasts for every change (red when a task is cancelled), and task counts by status.
 - **Sticky navigation:** the top bar stays in place while scrolling long task lists.
 - **Skill inference:** leave a task's skills empty and they're inferred from its title (Gemini, or keyword rules when no key is configured). Inferred skills are marked "AI" or "Auto".
 - **One command to run:** `docker compose up --build`.
@@ -32,10 +35,10 @@ A full-stack app for assigning development tasks: **developers** have **skills**
 
 Requires Docker Desktop (or Docker Engine with Compose v2).
 
-```powershell
+```bash
 git clone https://github.com/HiroshiFuu/htx-task-assignment-fenghao.git
 cd htx-task-assignment-fenghao
-Copy-Item .env.example .env      # macOS/Linux: cp .env.example .env
+cp .env.example .env             # works in PowerShell too (cp = Copy-Item)
 docker compose up --build        # then open http://localhost:8080
 ```
 
@@ -50,13 +53,13 @@ The database is seeded with four developers (Alice [Frontend], Bob [Backend], Ca
 
 ### Local development
 
-Requires Node.js 24 LTS and npm 11. The backend uses **SQLite** locally, so no Docker is needed.
+Requires Node.js 24 LTS (see `.nvmrc`) and npm 11. The backend uses **SQLite** locally, so no Docker is needed. The commands below work in bash and PowerShell.
 
-```powershell
+```bash
 # Backend
 cd backend
 npm install
-Copy-Item .env.example .env
+cp .env.example .env
 npm run db:reset        # rebuild SQLite: schema → db push → generate → seed
 npm run start:dev       # http://localhost:3000/api · Swagger UI: http://localhost:3000/api/docs
 
@@ -66,15 +69,15 @@ npm install
 npm run dev             # http://localhost:5173 (proxies /api to the backend)
 ```
 
-The Vite dev server proxies `/api` to `http://localhost:3000`, mirroring the same-origin nginx setup in production, so no CORS is needed. If the backend runs elsewhere, set `API_PROXY_TARGET` before `npm run dev` (e.g. `$env:API_PROXY_TARGET="http://localhost:3001"`); it is read only by the dev server and never bundled.
+The Vite dev server proxies `/api` to `http://localhost:3000`, mirroring the same-origin nginx setup in production, so no CORS is needed. If the backend runs elsewhere, set `API_PROXY_TARGET` before `npm run dev` (bash: `API_PROXY_TARGET=http://localhost:3001 npm run dev`; PowerShell: `$env:API_PROXY_TARGET="http://localhost:3001"` first); it is read only by the dev server and never bundled.
 
 **PostgreSQL in development** (creating migrations, running the e2e suite against PostgreSQL):
 
-```powershell
-Copy-Item .env.example .env          # repo root
+```bash
+cp .env.example .env                 # repo root
 docker compose up -d db              # 127.0.0.1:5433 (from docker-compose.override.yml)
 cd backend
-Copy-Item .env.pg.example .env.pg    # keep its password in sync with the root .env
+cp .env.pg.example .env.pg           # keep its password in sync with the root .env
 npm run db:migrate:pg -- --name <migration_name>   # the only way to create migrations
 npm run db:reset:pg                  # apply all migrations + generate + seed
 npm run test:e2e:pg
@@ -366,14 +369,14 @@ Additional decisions made during implementation: a `position` column for sibling
 
 ## 10. Testing
 
-```powershell
+```bash
 cd backend
 npm run lint
 npm test                 # unit tests
-npm run test:e2e         # HTTP e2e on SQLite
+npm run test:e2e         # HTTP e2e on SQLite (after `npm run db:reset`)
 npm run test:e2e:pg      # the same e2e suite on PostgreSQL (needs `docker compose up -d db`)
 
-cd ..\frontend
+cd ../frontend
 npm run lint
 npm test
 ```
@@ -431,8 +434,8 @@ Accepted by design: on SQLite the `status` enum is unconstrained TEXT and the ti
 
 This project was built with **Claude Code** (Anthropic's agentic coding tool) under human direction and review. How:
 
-1. **Human-written plan and rules first.** Before any code, I wrote a phased plan (requirements traceability, the decisions D1–D14 above, data model, API contract, acceptance criteria per phase) and a `CLAUDE.md` file of project rules that Claude Code reads every session: fixed tech stack, layering, dialect-portability rules, security baseline, scope guardrails ("no microservices, no Redis…"), Windows/LF constraints, and a Definition of Done. Reference implementations for the trickiest infrastructure (SQLite/PostgreSQL dual setup) were provided up front, to be used without rewriting.
-2. **One phase at a time.** Claude Code implemented exactly one phase per session (scaffold → schema → API → frontend → subtasks → LLM → Docker → delivery) and stopped for review. It was not allowed to commit or push: every commit, branch push, PR and merge was done by me after reading the diff.
+1. **Human-written plan and rules first.** Before any code, I wrote a phased plan (requirements traceability, the decisions D1–D15 above, data model, API contract, acceptance criteria per phase) and a `CLAUDE.md` file of project rules that Claude Code reads every session. Both are private working documents and are not in this repository; their substance is in this README, and [AGENTS.md](AGENTS.md) is the public guide for anyone working on the code. The rules covered: fixed tech stack, layering, dialect-portability rules, security baseline, scope guardrails ("no microservices, no Redis…"), Windows/LF constraints, and a Definition of Done. Reference implementations for the trickiest infrastructure (SQLite/PostgreSQL dual setup) were provided up front, to be used without rewriting.
+2. **One phase at a time.** Claude Code implemented one phase at a time (scaffold → schema → API → frontend → subtasks → LLM → Docker → delivery), then smaller iterations (seeded subtask trees, sticky navigation, the Cancelled status, UI polish), stopping for review after each. It was not allowed to commit or push: I made every commit and push, and merged the work (mostly through pull requests) after reading the diff.
 3. **Built-in verification, not trust.** The Definition of Done required, for every phase: lint and tests green in both packages, the e2e suite passing on **both** SQLite and PostgreSQL, manual checks in a real browser (the agent drove one: creating trees, confirming cascades, checking mobile layout and the CSP), and copy-paste verification steps for me to rerun.
 4. **Independent security review per phase.** A separate review agent with a security checklist reviewed each phase's diff. Critical/High findings were fixed before the phase closed; several real issues were caught this way (e.g. a stack overflow on deeply nested JSON, rate limits that would have counted everyone behind nginx as one client, a Prisma engine that would have been downloaded at container start-up). Everything else went into the roadmap above.
 5. **Human decisions where it mattered:** choosing between options the agent surfaced (e.g. how to split commits, whether to stack branches, which LLM provider to support), consenting explicitly before destructive database resets, and keeping secrets out of the repository.
