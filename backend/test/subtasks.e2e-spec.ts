@@ -346,6 +346,73 @@ describe('Subtasks (e2e)', () => {
     });
   });
 
+  describe('Cancelled status', () => {
+    it('lets a parent be Done when its subtasks are Done or Cancelled', async () => {
+      const root = await createTree(WIREFRAME_TREE);
+      const child = root.subtasks[0];
+      const [upload, validate] = child.subtasks;
+      await setStatus(upload.id, { status: 'DONE' }).expect(200);
+      await setStatus(validate.id, { status: 'CANCELLED' }).expect(200);
+      await setStatus(child.id, { status: 'DONE' }).expect(200);
+      await setStatus(root.id, { status: 'DONE' }).expect(200);
+      expect(await statusesOf(root)).toEqual({
+        '1 Profile feature': 'DONE',
+        '1.1 Profile API': 'DONE',
+        '1.1.1 Upload endpoint': 'DONE',
+        '1.1.2 Validate image': 'CANCELLED',
+      });
+    });
+
+    it('can cancel a task whose subtasks are still open', async () => {
+      const root = await createTree(WIREFRAME_TREE);
+      await setStatus(root.id, { status: 'CANCELLED' }).expect(200);
+    });
+
+    it('needs confirmation to reopen a Cancelled subtask under Done parents', async () => {
+      const root = await createTree(WIREFRAME_TREE);
+      const child = root.subtasks[0];
+      const [upload, validate] = child.subtasks;
+      await setStatus(upload.id, { status: 'DONE' }).expect(200);
+      await setStatus(validate.id, { status: 'CANCELLED' }).expect(200);
+      await setStatus(child.id, { status: 'DONE' }).expect(200);
+
+      expectProblem(
+        await setStatus(validate.id, { status: 'TODO' }),
+        409,
+        'CASCADE_CONFIRMATION_REQUIRED',
+      );
+      expect((await statusesOf(root))['1.1.2 Validate image']).toBe(
+        'CANCELLED',
+      );
+
+      const response = await setStatus(validate.id, {
+        status: 'TODO',
+        confirmCascade: true,
+      }).expect(200);
+      expect(
+        (response.body as { cascadedTaskIds: string[] }).cascadedTaskIds,
+      ).toEqual([child.id]);
+      expect((await statusesOf(root))['1.1 Profile API']).toBe('IN_PROGRESS');
+    });
+
+    it('moves a Done subtask to Cancelled without touching Done parents', async () => {
+      const root = await createTree(WIREFRAME_TREE);
+      const child = root.subtasks[0];
+      for (const task of child.subtasks) {
+        await setStatus(task.id, { status: 'DONE' }).expect(200);
+      }
+      await setStatus(child.id, { status: 'DONE' }).expect(200);
+
+      const response = await setStatus(child.subtasks[0].id, {
+        status: 'CANCELLED',
+      }).expect(200);
+      expect(
+        (response.body as { cascadedTaskIds: string[] }).cascadedTaskIds,
+      ).toEqual([]);
+      expect((await statusesOf(root))['1.1 Profile API']).toBe('DONE');
+    });
+  });
+
   it('returns the subtree after assigning a parent task', async () => {
     const root = await createTree(WIREFRAME_TREE);
     const child = root.subtasks[0];

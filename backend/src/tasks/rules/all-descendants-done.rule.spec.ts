@@ -32,7 +32,7 @@ describe('AllDescendantsDoneRule', () => {
     expect(result).toEqual({
       kind: 'reject',
       code: 'SUBTASKS_NOT_DONE',
-      detail: '"Task 1" has 1 subtask(s) that are not done yet.',
+      detail: '"Task 1" has 1 subtask(s) that are not done or cancelled yet.',
       extensions: { openSubtasks: [ref('1.1.1', TaskStatus.TODO)] },
     });
   });
@@ -41,6 +41,40 @@ describe('AllDescendantsDoneRule', () => {
     expect(
       rule.evaluate(
         context([ref('1.1', TaskStatus.DONE), ref('1.1.1', TaskStatus.DONE)]),
+      ).kind,
+    ).toBe('allow');
+  });
+
+  it('allows Done when every descendant is Done or Cancelled', () => {
+    expect(
+      rule.evaluate(
+        context([
+          ref('1.1', TaskStatus.CANCELLED),
+          ref('1.2', TaskStatus.DONE),
+          ref('1.2.1', TaskStatus.CANCELLED),
+        ]),
+      ).kind,
+    ).toBe('allow');
+  });
+
+  it('still rejects when a Cancelled sibling sits next to an open one', () => {
+    expect(
+      rule.evaluate(
+        context([
+          ref('1.1', TaskStatus.CANCELLED),
+          ref('1.2', TaskStatus.IN_PROGRESS),
+        ]),
+      ),
+    ).toMatchObject({
+      kind: 'reject',
+      extensions: { openSubtasks: [ref('1.2', TaskStatus.IN_PROGRESS)] },
+    });
+  });
+
+  it('allows Cancelled regardless of open descendants', () => {
+    expect(
+      rule.evaluate(
+        context([ref('1.1', TaskStatus.TODO)], TaskStatus.CANCELLED),
       ).kind,
     ).toBe('allow');
   });

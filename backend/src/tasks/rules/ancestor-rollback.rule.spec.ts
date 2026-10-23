@@ -65,6 +65,34 @@ describe('AncestorRollbackRule', () => {
     ).toEqual({ kind: 'allow' });
   });
 
+  it('also requires confirmation when reopening a Cancelled task under Done parents', () => {
+    expect(
+      rule.evaluate(
+        context({
+          task: ref('1.1.1', TaskStatus.CANCELLED),
+          targetStatus: TaskStatus.IN_PROGRESS,
+        }),
+      ),
+    ).toMatchObject({
+      kind: 'requireConfirmation',
+      affectedTasks: DONE_ANCESTORS,
+    });
+  });
+
+  it('needs no cascade between Done and Cancelled (the task stays closed)', () => {
+    expect(
+      rule.evaluate(context({ targetStatus: TaskStatus.CANCELLED })),
+    ).toEqual({ kind: 'allow' });
+    expect(
+      rule.evaluate(
+        context({
+          task: ref('1.1.1', TaskStatus.CANCELLED),
+          targetStatus: TaskStatus.DONE,
+        }),
+      ),
+    ).toEqual({ kind: 'allow' });
+  });
+
   it('does nothing when the task is not leaving Done', () => {
     expect(
       rule.evaluate(

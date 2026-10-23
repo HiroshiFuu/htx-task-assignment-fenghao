@@ -4,8 +4,12 @@ import {
   StatusTransitionContext,
   StatusTransitionRule,
 } from './status-transition-rule';
+import { isClosed } from './task-status';
 
-/** Decision D4: a task can be Done only when every descendant, at any depth, is Done. */
+/**
+ * Decision D4: a task can be Done only when every descendant, at any depth, is
+ * closed: Done, or Cancelled (cancelled work no longer blocks its parent).
+ */
 export class AllDescendantsDoneRule implements StatusTransitionRule {
   evaluate({
     task,
@@ -16,7 +20,7 @@ export class AllDescendantsDoneRule implements StatusTransitionRule {
       return ALLOW;
     }
     const openSubtasks = descendants.filter(
-      (descendant) => descendant.status !== TaskStatus.DONE,
+      (descendant) => !isClosed(descendant.status),
     );
     if (openSubtasks.length === 0) {
       return ALLOW;
@@ -24,7 +28,7 @@ export class AllDescendantsDoneRule implements StatusTransitionRule {
     return {
       kind: 'reject',
       code: 'SUBTASKS_NOT_DONE',
-      detail: `"${task.title}" has ${String(openSubtasks.length)} subtask(s) that are not done yet.`,
+      detail: `"${task.title}" has ${String(openSubtasks.length)} subtask(s) that are not done or cancelled yet.`,
       extensions: { openSubtasks },
     };
   }
