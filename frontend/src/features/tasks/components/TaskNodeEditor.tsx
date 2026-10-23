@@ -1,5 +1,6 @@
 import type { Dispatch } from 'react';
 import type { Skill } from '../../../api/types';
+import { PlusIcon } from '../../../components/icons';
 import { secondaryButtonClass } from '../../../components/styles';
 import {
   canAddSubtask,
@@ -51,15 +52,19 @@ export function TaskNodeEditor({
       className={
         isRoot
           ? 'space-y-4'
-          : 'space-y-4 border-l-2 border-indigo-100 pt-2 pl-3 sm:pl-5'
+          : 'space-y-4 rounded-lg border border-slate-200 border-l-4 border-l-indigo-300 bg-slate-50/70 p-3 sm:p-4'
       }
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2
           id={`${titleId}-heading`}
-          className="text-sm font-semibold text-slate-700"
+          className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700"
         >
-          Task {label}
+          <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-semibold text-indigo-700 tabular-nums">
+            <span className="sr-only">Task </span>
+            {label}
+          </span>
+          <span aria-hidden="true">{isRoot ? 'Task' : 'Subtask'}</span>
         </h2>
         {!isRoot && (
           <button
@@ -91,7 +96,7 @@ export function TaskNodeEditor({
           onChange={(event) => {
             dispatch({ type: 'UPDATE_TITLE', path, title: event.target.value });
           }}
-          className="block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 aria-invalid:border-red-500 aria-invalid:focus-visible:ring-red-500"
+          className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 aria-invalid:border-red-500 aria-invalid:focus-visible:ring-red-500"
         />
         {titleError && (
           <p id={titleErrorId} className="text-sm text-red-700">
@@ -111,11 +116,11 @@ export function TaskNodeEditor({
             title)
           </span>
         </legend>
-        <div className="flex flex-wrap gap-4">
+        <div className="flex flex-wrap gap-2">
           {skills.map((skill) => (
             <label
               key={skill.id}
-              className="inline-flex items-center gap-2 text-sm"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700 transition-colors select-none hover:border-indigo-300 has-checked:border-indigo-400 has-checked:bg-indigo-50 has-checked:text-indigo-800 has-focus-visible:ring-2 has-focus-visible:ring-indigo-500"
             >
               <input
                 type="checkbox"
@@ -123,7 +128,7 @@ export function TaskNodeEditor({
                 onChange={() => {
                   dispatch({ type: 'TOGGLE_SKILL', path, skillId: skill.id });
                 }}
-                className="size-4 rounded border-slate-300 text-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className="size-4 rounded border-slate-300 accent-indigo-600 focus-visible:outline-none"
               />
               {skill.name}
             </label>
@@ -159,8 +164,9 @@ export function TaskNodeEditor({
         onClick={() => {
           dispatch({ type: 'ADD_SUBTASK', path, key: crypto.randomUUID() });
         }}
-        className={`${secondaryButtonClass} disabled:cursor-not-allowed disabled:opacity-50`}
+        className={`${secondaryButtonClass} gap-1.5 disabled:cursor-not-allowed disabled:opacity-50`}
       >
+        <PlusIcon />
         Add subtask to task {label}
       </button>
     </div>

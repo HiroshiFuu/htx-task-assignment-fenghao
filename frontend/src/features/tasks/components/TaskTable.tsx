@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Developer, TaskNode } from '../../../api/types';
+import { ChevronIcon } from '../../../components/icons';
 import type { Feedback } from '../../../components/LiveRegion';
 import { visibleRows } from '../tree';
 import { AssigneeSelect } from './AssigneeSelect';
@@ -36,10 +37,10 @@ export function TaskTable({ tasks, developers, onFeedback }: TaskTableProps) {
   };
 
   return (
-    <table className="block w-full md:table md:overflow-hidden md:rounded-lg md:bg-white md:shadow-sm md:ring-1 md:ring-slate-200">
+    <table className="block w-full md:table md:overflow-hidden md:rounded-xl md:bg-white md:shadow-sm md:ring-1 md:ring-slate-200">
       <caption className="sr-only">Tasks</caption>
-      <thead className="sr-only md:not-sr-only md:bg-slate-100">
-        <tr className="text-left text-xs font-semibold tracking-wide text-slate-600 uppercase">
+      <thead className="sr-only md:not-sr-only md:border-b md:border-slate-200 md:bg-slate-50">
+        <tr className="text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
           <th scope="col" className="px-4 py-3">
             Title
           </th>
@@ -54,12 +55,12 @@ export function TaskTable({ tasks, developers, onFeedback }: TaskTableProps) {
           </th>
         </tr>
       </thead>
-      <tbody className="block space-y-3 md:table-row-group md:space-y-0 md:divide-y md:divide-slate-200">
+      <tbody className="block space-y-3 md:table-row-group md:space-y-0 md:divide-y md:divide-slate-100">
         {visibleRows(tasks, collapsedIds).map(
           ({ task, depth, ancestors, hasSubtasks, collapsed }) => (
             <tr
               key={task.id}
-              className={`block rounded-lg bg-white py-2 shadow-sm ring-1 ring-slate-200 md:ml-0 md:table-row md:rounded-none md:py-0 md:shadow-none md:ring-0 ${indent(CARD_INDENT, depth)} ${depth > 0 ? 'md:bg-slate-50/60' : ''}`}
+              className={`block rounded-xl bg-white py-2 shadow-sm ring-1 ring-slate-200 transition-colors md:ml-0 md:table-row md:rounded-none md:py-0 md:shadow-none md:ring-0 md:hover:bg-indigo-50/40 ${indent(CARD_INDENT, depth)} ${depth > 0 ? 'md:bg-slate-50/60' : ''}`}
             >
               <td data-label="Title" className={cellClass}>
                 <span
@@ -73,9 +74,11 @@ export function TaskTable({ tasks, developers, onFeedback }: TaskTableProps) {
                       }}
                       aria-expanded={!collapsed}
                       aria-label={`${collapsed ? 'Expand' : 'Collapse'} subtasks of ${task.title}`}
-                      className="-my-0.5 shrink-0 rounded px-1 text-slate-500 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-indigo-600"
+                      className="-my-0.5 shrink-0 rounded p-0.5 text-slate-500 hover:bg-slate-200/70 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-indigo-600"
                     >
-                      <span aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
+                      <ChevronIcon
+                        className={`size-4 transition-transform motion-reduce:transition-none ${collapsed ? '' : 'rotate-90'}`}
+                      />
                     </button>
                   ) : (
                     depth > 0 && (

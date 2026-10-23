@@ -6,11 +6,12 @@ import {
   type TaskStatus,
   type TaskSummary,
 } from '../../../api/types';
+import { LockIcon } from '../../../components/icons';
 import type { Feedback } from '../../../components/LiveRegion';
-import { selectClass } from '../../../components/styles';
+import { statusSelectBaseClass } from '../../../components/styles';
 import { useConfirmedCascadeStatus, useUpdateTaskStatus } from '../queries';
-import { isClosed, STATUS_LABELS } from '../status';
-import { hasOpenDescendant } from '../tree';
+import { isClosed, STATUS_LABELS, STATUS_TONES } from '../status';
+import { countOpenDescendants } from '../tree';
 import { ConfirmCascadeDialog } from './ConfirmCascadeDialog';
 
 interface StatusSelectProps {
@@ -50,7 +51,8 @@ export function StatusSelect({
   const [pendingCascade, setPendingCascade] = useState<PendingCascade | null>(
     null,
   );
-  const doneBlocked = task.status !== 'DONE' && hasOpenDescendant(task);
+  const openSubtasks = task.status === 'DONE' ? 0 : countOpenDescendants(task);
+  const doneBlocked = openSubtasks > 0;
 
   const reportError = (error: unknown) => {
     onFeedback({
@@ -80,7 +82,7 @@ export function StatusSelect({
       {
         onSuccess: () => {
           onFeedback({
-            kind: 'success',
+            kind: status === 'CANCELLED' ? 'cancelled' : 'success',
             message: `"${task.title}" is now ${STATUS_LABELS[status]}.`,
           });
         },
@@ -117,7 +119,7 @@ export function StatusSelect({
   };
 
   return (
-    <>
+    <div className="flex flex-col items-end gap-1 md:items-start">
       <label htmlFor={id} className="sr-only">
         Status for {task.title}
       </label>
@@ -128,22 +130,30 @@ export function StatusSelect({
         value={task.status}
         onChange={handleChange}
         aria-describedby={doneBlocked ? hintId : undefined}
-        className={selectClass}
+        className={`${statusSelectBaseClass} ${STATUS_TONES[task.status].control}`}
       >
-        {TASK_STATUSES.map((status) => (
-          <option
-            key={status}
-            value={status}
-            disabled={status === 'DONE' && doneBlocked}
-          >
-            {STATUS_LABELS[status]}
-          </option>
-        ))}
+        {TASK_STATUSES.map((status) => {
+          const locked = status === 'DONE' && doneBlocked;
+          return (
+            <option key={status} value={status} disabled={locked}>
+              {/* Spelled out: a greyed-out option alone is easy to miss. */}
+              {locked ? 'Done (locked)' : STATUS_LABELS[status]}
+            </option>
+          );
+        })}
       </select>
       {doneBlocked && (
-        <span id={hintId} className="sr-only">
-          Done is unavailable until all subtasks are done or cancelled.
-        </span>
+        <p
+          id={hintId}
+          className="flex max-w-40 items-start gap-1 text-xs text-amber-800"
+        >
+          <LockIcon className="mt-px size-3.5 shrink-0" />
+          <span>
+            {`Done locked: ${String(openSubtasks)} ${
+              openSubtasks === 1 ? 'subtask' : 'subtasks'
+            } still open.`}
+          </span>
+        </p>
       )}
       {pendingCascade && (
         <ConfirmCascadeDialog
@@ -160,6 +170,6 @@ export function StatusSelect({
           returnFocusTo={selectRef}
         />
       )}
-    </>
+    </div>
   );
 }

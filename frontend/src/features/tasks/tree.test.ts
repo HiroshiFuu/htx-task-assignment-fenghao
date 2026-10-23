@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { makeTask } from '../../test/fixtures';
-import { hasOpenDescendant, visibleRows } from './tree';
+import {
+  countByStatus,
+  countOpenDescendants,
+  hasOpenDescendant,
+  visibleRows,
+} from './tree';
 
 const leafA = makeTask({ id: '1.1.1', title: 'Upload', status: 'DONE' });
 const leafB = makeTask({ id: '1.1.2', title: 'Validate', status: 'TODO' });
@@ -47,5 +52,24 @@ describe('hasOpenDescendant', () => {
         }),
       ),
     ).toBe(true);
+  });
+});
+
+describe('countOpenDescendants', () => {
+  it('counts open subtasks at every depth, not the task itself', () => {
+    expect(countOpenDescendants(root)).toBe(2);
+    expect(countOpenDescendants(child)).toBe(1);
+    expect(countOpenDescendants(leafB)).toBe(0);
+  });
+});
+
+describe('countByStatus', () => {
+  it('counts every task and subtask once', () => {
+    expect(countByStatus([root, other])).toEqual({
+      TODO: 4,
+      IN_PROGRESS: 0,
+      DONE: 1,
+      CANCELLED: 0,
+    });
   });
 });

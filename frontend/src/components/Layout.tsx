@@ -22,8 +22,9 @@ export function Layout() {
         {/* One row at every width: the header height must stay below the
             scroll-padding-top in index.css so focused elements are never hidden. */}
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-4 py-3">
-          <p className="min-w-0 truncate text-base font-semibold sm:text-lg">
-            Task Assignment
+          <p className="flex min-w-0 items-center gap-2 text-base font-semibold tracking-tight sm:text-lg">
+            <img src="/favicon.svg" alt="" className="size-7 shrink-0" />
+            <span className="truncate">Task Assignment</span>
           </p>
           <nav aria-label="Main" className="shrink-0">
             <ul className="flex gap-1">

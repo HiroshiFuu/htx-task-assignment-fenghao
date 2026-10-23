@@ -1,4 +1,4 @@
-import type { TaskNode } from '../../api/types';
+import type { TaskNode, TaskStatus } from '../../api/types';
 import { isClosed } from './status';
 
 export interface VisibleRow {
@@ -40,11 +40,34 @@ export function visibleRows(
 }
 
 /**
- * UX hint only (decision D4): any descendant still To-do or In Progress. Cancelled
- * subtasks don't block their parent. The backend makes the final call.
+ * UX hint only (decision D4): descendants at any depth still To-do or In Progress.
+ * Cancelled subtasks don't block their parent. The backend makes the final call.
  */
-export function hasOpenDescendant(task: TaskNode): boolean {
-  return task.subtasks.some(
-    (child) => !isClosed(child.status) || hasOpenDescendant(child),
+export function countOpenDescendants(task: TaskNode): number {
+  return task.subtasks.reduce(
+    (sum, child) =>
+      sum + (isClosed(child.status) ? 0 : 1) + countOpenDescendants(child),
+    0,
   );
+}
+
+export const hasOpenDescendant = (task: TaskNode): boolean =>
+  countOpenDescendants(task) > 0;
+
+/** Every task in the forest, counted by status, for the list summary. */
+export function countByStatus(
+  forest: readonly TaskNode[],
+): Record<TaskStatus, number> {
+  const counts: Record<TaskStatus, number> = {
+    TODO: 0,
+    IN_PROGRESS: 0,
+    DONE: 0,
+    CANCELLED: 0,
+  };
+  const visit = (task: TaskNode) => {
+    counts[task.status] += 1;
+    task.subtasks.forEach(visit);
+  };
+  forest.forEach(visit);
+  return counts;
 }
