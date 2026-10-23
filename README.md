@@ -17,7 +17,8 @@ A full-stack app for assigning development tasks: **developers** have **skills**
 - **Task list (`/`):** Title / Skills / Status / Assignee, with subtasks indented under their parent and collapsible. Status and assignee change in place, optimistically, and roll back with the server's reason if refused.
 - **Skill-matched assignment:** the assignee list only offers developers whose skills cover the task, and the API enforces the same rule.
 - **Subtasks of any depth** (up to 5 levels / 50 tasks per request): created in one go with a recursive editor (1 / 1.1 / 1.1.1 …).
-- **"Done" means done:** a task can be Done only when every subtask at any depth is Done. Reopening a subtask under a Done parent asks for confirmation, then moves those parents back to In Progress.
+- **"Done" means done:** a task can be Done only when every subtask at any depth is Done or **Cancelled**. Reopening a Done or Cancelled subtask under a Done parent asks for confirmation, then moves those parents back to In Progress.
+- **Sticky navigation:** the top bar stays in place while scrolling long task lists.
 - **Skill inference:** leave a task's skills empty and they're inferred from its title (Gemini, or keyword rules when no key is configured). Inferred skills are marked "AI" or "Auto".
 - **One command to run:** `docker compose up --build`.
 
@@ -150,7 +151,7 @@ erDiagram
   tasks {
     uuid id PK
     varchar title "1–500 chars, CHECK not blank (PG)"
-    enum status "TODO | IN_PROGRESS | DONE"
+    enum status "TODO | IN_PROGRESS | DONE | CANCELLED"
     uuid assignee_id FK "nullable, SET NULL"
     uuid parent_id FK "nullable, CASCADE"
     int position "sibling order"
@@ -167,7 +168,7 @@ erDiagram
 | `task_skills` | PK (`task_id`, `skill_id`); cascades with the task, restricted for skills |
 
 - **Indexes:** `idx_tasks_parent_id`, `idx_tasks_assignee_id`, `idx_task_skills_skill`, `idx_dev_skills_skill` (composite primary keys already cover lookups by their leading column).
-- **Migrations** (PostgreSQL only, in `backend/prisma/migrations/`) show how the schema evolved: `init` (with a hand-added `CHECK (length(trim(title)) > 0)` that Prisma can't express), `add_subtasks` (`parent_id`, its index, `position`), `add_skill_source`.
+- **Migrations** (PostgreSQL only, in `backend/prisma/migrations/`) show how the schema evolved: `init` (with a hand-added `CHECK (length(trim(title)) > 0)` that Prisma can't express), `add_subtasks` (`parent_id`, its index, `position`), `add_skill_source`, `add_cancelled_status`.
 - **`position`:** siblings created in one request can share a `created_at` millisecond and their random UUIDs carry no order, so an explicit position keeps 1.1 before 1.2.
 - **Seed** (`prisma/seed.ts`): idempotent upserts with fixed UUIDs. Because it bypasses the API, an e2e test checks the sample data against the real business rules.
 
@@ -176,8 +177,8 @@ erDiagram
 | Rule | Behaviour |
 |---|---|
 | **Skill match** (D3) | A developer can take a task only if their skills include **all** of the task's skills → otherwise 422 `SKILL_MISMATCH` listing `missingSkills`. Subtasks follow the same rule (D9). |
-| **Done rule** (D4) | A task can be Done only when **every descendant** at any depth is Done → otherwise 422 `SUBTASKS_NOT_DONE` listing `openSubtasks`. |
-| **Cascade rollback** (D5) | Reopening a Done task whose ancestors are Done returns **409** `CASCADE_CONFIRMATION_REQUIRED` with `affectedTasks` and changes nothing. Resubmitting with `confirmCascade: true` updates the task and moves every Done ancestor to `IN_PROGRESS` in the same transaction, recomputing the affected set server-side. This keeps the invariant "parent Done ⇒ all descendants Done". |
+| **Done rule** (D4, D15) | A task can be Done only when **every descendant** at any depth is **closed** (Done or Cancelled) → otherwise 422 `SUBTASKS_NOT_DONE` listing `openSubtasks`. Cancelling is always allowed, even with open subtasks. |
+| **Cascade rollback** (D5) | Reopening a closed task (Done or Cancelled → To-do / In Progress) whose ancestors are Done returns **409** `CASCADE_CONFIRMATION_REQUIRED` with `affectedTasks` and changes nothing. Resubmitting with `confirmCascade: true` updates the task and moves every Done ancestor to `IN_PROGRESS` in the same transaction, recomputing the affected set server-side. Done ↔ Cancelled keeps the task closed, so it never cascades. This keeps the invariant "a Done task has only closed descendants". |
 | **Never without skills** (D6) | Skills left empty are inferred; if the LLM fails or is not configured, keyword rules decide, and a title matching nothing requires every skill (the conservative choice). |
 
 Rules form a chain (`runRuleChain`) that returns `allow` (optionally with tasks to cascade), `reject` (→ 422) or `requireConfirmation` (→ 409). The service loads the task with its ancestors and descendants; the rules are pure functions of that snapshot and are unit-tested without a database. The server is always the authority; the UI only predicts (it disables "Done" while subtasks are open and opens the confirmation dialog straight away when the cached tree shows Done parents).
@@ -240,7 +241,7 @@ Base path `/api`. **Swagger UI:** http://localhost:3000/api/docs in development 
 
 ```ts
 TaskNode = {
-  id: string; title: string; status: 'TODO' | 'IN_PROGRESS' | 'DONE';
+  id: string; title: string; status: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
   skills: { id: string; name: string }[]; skillSource: 'USER' | 'LLM' | 'FALLBACK';
   assignee: { id: string; name: string } | null;
   parentId: string | null; subtasks: TaskNode[];
@@ -342,10 +343,10 @@ Each pattern is used where it solves a concrete problem; none for its own sake.
 | # | Question | Decision |
 |---|---|---|
 | D1 | Authentication | Not in v1; an explicit assumption. The architecture leaves room for a Nest Guard. |
-| D2 | Task statuses | `TODO` / `IN_PROGRESS` / `DONE`, shown as "To-do" / "In Progress" / "Done". |
+| D2 | Task statuses | `TODO` / `IN_PROGRESS` / `DONE` / `CANCELLED`, shown as "To-do" / "In Progress" / "Done" / "Cancelled". |
 | D3 | Skill-match semantics | A developer's skills must be a **superset** of the task's required skills. |
 | D4 | Scope of the Done rule | **All descendants** (recursive), not just direct children. |
-| D5 | Reopening a subtask whose parent is Done | **Cascade rollback with confirmation:** every Done ancestor moves back to `IN_PROGRESS`; without confirmation the server returns 409 listing them, and the client resubmits with `confirmCascade: true`. Keeps "parent Done ⇒ all descendants Done". |
+| D5 | Reopening a subtask whose parent is Done | **Cascade rollback with confirmation:** every Done ancestor moves back to `IN_PROGRESS`; without confirmation the server returns 409 listing them, and the client resubmits with `confirmCascade: true`. Keeps "a Done task has only closed descendants". |
 | D5b | Rollback target status | `IN_PROGRESS`: part of the parent's work is already complete, so this is more accurate than `TODO`. |
 | D6 | A task ending up without skills | Not allowed: the LLM infers them; if it fails or returns nothing, keyword rules decide. |
 | D7 | Unassigning | Allowed with `developerId: null`. |
@@ -356,6 +357,7 @@ Each pattern is used where it solves a concrete problem; none for its own sake.
 | D12 | LLM model | Configurable via `GEMINI_MODEL`; defaults to the Gemini Flash family (`gemini-3.1-flash-lite`). |
 | D13 | Local database | **SQLite** for day-to-day development (no Docker, rebuilt in seconds); **PostgreSQL** for Docker, migrations and the PostgreSQL e2e run. The PostgreSQL schema is the single source of truth. |
 | D14 | Concurrency control | `RowLockStrategy`: `SELECT … FOR UPDATE` in the transaction on PostgreSQL; no-op on SQLite (single writer). |
+| D15 | Cancelled tasks | `CANCELLED` closes a task like `DONE`: cancelled subtasks don't block their parent from being Done, reopening a Cancelled subtask under a Done parent cascades like reopening a Done one, and Done ↔ Cancelled never cascades. A task can be cancelled at any time; its open subtasks are left as they are (no automatic cancel cascade). |
 
 Additional decisions made during implementation: a `position` column for sibling order; keyword-rule results labelled "Auto" rather than "AI" in the UI; cascades not applied optimistically; the classifier called once per tree rather than once per task.
 
@@ -377,9 +379,9 @@ npm test
 
 | Suite | Count | Covers |
 |---|---|---|
-| Backend unit (Jest) | 66 | Every business rule (incl. a grandchild still open blocking Done, all cascade cases); rule chain; tree limits (including a 100,000-level input); JSON depth guard; forest builder; skill resolution; keyword classifier on the brief's examples; Gemini adapter (prompt shape, schema, output filtering, error mapping); resilience decorator (timeout, retries, partial fallback) |
-| Backend e2e (supertest) | 82 on SQLite **and** 82 on PostgreSQL | Every endpoint; Swagger on/off by `ENABLE_SWAGGER`; validation and problem+json (no internals leaked); skill match (Carol ✓ / Alice ✗ on a Frontend + Backend task); the 1 / 1.1 / 1.1.1 / 1.1.2 tree in one request; depth/size limits and pathological bodies → 400; Done rule; full cascade (409 with the database unchanged → confirm → ancestors In Progress, sibling still Done); skill inference (one batched call, `USER`/`LLM`/`FALLBACK`); rate limits, including per-client limits behind a proxy and spoofing resistance; seed idempotency and seed data obeying the business rules |
-| Frontend (Vitest + RTL) | 52 | Eligibility filter; assignee options; optimistic status/assignee updates with rollback; tree list and collapse; Done disabled while subtasks are open; cascade dialog (Cancel restores and sends nothing, Confirm sends `confirmCascade`, stale-cache 409 opens it); draft reducer (nested add/remove/update, limits, nested server errors); create page with keyboard focus; API client error handling; AI/Auto badges |
+| Backend unit (Jest) | 71 | Every business rule (incl. a grandchild still open blocking Done, Cancelled subtasks not blocking it, all cascade cases incl. reopening Cancelled); rule chain; tree limits (including a 100,000-level input); JSON depth guard; forest builder; skill resolution; keyword classifier on the brief's examples; Gemini adapter (prompt shape, schema, output filtering, error mapping); resilience decorator (timeout, retries, partial fallback) |
+| Backend e2e (supertest) | 86 on SQLite **and** 86 on PostgreSQL | Every endpoint; Swagger on/off by `ENABLE_SWAGGER`; validation and problem+json (no internals leaked); skill match (Carol ✓ / Alice ✗ on a Frontend + Backend task); the 1 / 1.1 / 1.1.1 / 1.1.2 tree in one request; depth/size limits and pathological bodies → 400; Done rule; full cascade (409 with the database unchanged → confirm → ancestors In Progress, sibling still Done); skill inference (one batched call, `USER`/`LLM`/`FALLBACK`); rate limits, including per-client limits behind a proxy and spoofing resistance; seed idempotency and seed data obeying the business rules |
+| Frontend (Vitest + RTL) | 56 | Eligibility filter; assignee options; optimistic status/assignee updates with rollback; tree list and collapse; Done disabled while subtasks are open (and enabled once they're Done or Cancelled); Cancelled styling; reopening Cancelled asks for confirmation; cascade dialog (Cancel restores and sends nothing, Confirm sends `confirmCascade`, stale-cache 409 opens it); draft reducer (nested add/remove/update, limits, nested server errors); create page with keyboard focus; API client error handling; AI/Auto badges |
 
 The e2e tests always replace the skill classifier, so they are deterministic and never call Gemini. Beyond automated tests, each phase was checked manually in a browser, and the Docker stack was cold-started from a fresh copy containing only the committed files.
 
