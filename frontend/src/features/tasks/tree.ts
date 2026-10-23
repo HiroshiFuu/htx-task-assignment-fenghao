@@ -1,4 +1,5 @@
 import type { TaskNode } from '../../api/types';
+import { isClosed } from './status';
 
 export interface VisibleRow {
   task: TaskNode;
@@ -38,9 +39,12 @@ export function visibleRows(
   return rows;
 }
 
-/** UX hint only (decision D4): the backend makes the final call. */
+/**
+ * UX hint only (decision D4): any descendant still To-do or In Progress. Cancelled
+ * subtasks don't block their parent. The backend makes the final call.
+ */
 export function hasOpenDescendant(task: TaskNode): boolean {
   return task.subtasks.some(
-    (child) => child.status !== 'DONE' || hasOpenDescendant(child),
+    (child) => !isClosed(child.status) || hasOpenDescendant(child),
   );
 }

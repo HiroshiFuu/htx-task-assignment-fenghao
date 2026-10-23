@@ -9,7 +9,7 @@ import {
 import type { Feedback } from '../../../components/LiveRegion';
 import { selectClass } from '../../../components/styles';
 import { useConfirmedCascadeStatus, useUpdateTaskStatus } from '../queries';
-import { STATUS_LABELS } from '../status';
+import { isClosed, STATUS_LABELS } from '../status';
 import { hasOpenDescendant } from '../tree';
 import { ConfirmCascadeDialog } from './ConfirmCascadeDialog';
 
@@ -64,7 +64,8 @@ export function StatusSelect({
     if (!status || status === task.status) {
       return;
     }
-    if (task.status === 'DONE') {
+    // Reopening a closed (Done or Cancelled) task under Done parents cascades.
+    if (isClosed(task.status) && !isClosed(status)) {
       const doneAncestors = ancestors.filter((a) => a.status === 'DONE');
       if (doneAncestors.length > 0) {
         setPendingCascade({
@@ -141,7 +142,7 @@ export function StatusSelect({
       </select>
       {doneBlocked && (
         <span id={hintId} className="sr-only">
-          Done is unavailable until all subtasks are done.
+          Done is unavailable until all subtasks are done or cancelled.
         </span>
       )}
       {pendingCascade && (

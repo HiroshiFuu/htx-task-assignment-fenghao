@@ -34,4 +34,18 @@ describe('hasOpenDescendant', () => {
     expect(hasOpenDescendant(makeTask({ subtasks: [leafA] }))).toBe(false);
     expect(hasOpenDescendant(other)).toBe(false);
   });
+
+  it('treats Cancelled subtasks as closed', () => {
+    const cancelled = makeTask({ id: 'c', status: 'CANCELLED' });
+    expect(hasOpenDescendant(makeTask({ subtasks: [leafA, cancelled] }))).toBe(
+      false,
+    );
+    expect(
+      hasOpenDescendant(
+        makeTask({
+          subtasks: [cancelled, makeTask({ status: 'IN_PROGRESS' })],
+        }),
+      ),
+    ).toBe(true);
+  });
 });

@@ -109,11 +109,70 @@ describe('TaskListPage tree', () => {
       within(rootStatus).getByRole('option', { name: 'Done' }),
     ).toBeDisabled();
     expect(rootStatus).toHaveAccessibleDescription(
-      'Done is unavailable until all subtasks are done.',
+      'Done is unavailable until all subtasks are done or cancelled.',
     );
     expect(
       within(await statusOf('Upload')).getByRole('option', { name: 'Done' }),
     ).toBeEnabled();
+  });
+
+  it('enables Done on a parent whose subtasks are Done or Cancelled, and strikes through Cancelled', async () => {
+    serve(() => [
+      tree({ root: 'TODO', child: 'TODO', leafA: 'DONE', leafB: 'CANCELLED' }),
+    ]);
+    renderWithProviders(<TaskListPage />);
+
+    const childStatus = await statusOf('API');
+    expect(
+      within(childStatus).getByRole('option', { name: 'Done' }),
+    ).toBeEnabled();
+    expect(
+      within(childStatus).getByRole('option', { name: 'Cancelled' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Validate')).toHaveClass('line-through');
+    expect(screen.getByText('Upload')).not.toHaveClass('line-through');
+  });
+
+  it('asks before reopening a Cancelled subtask of a Done parent', async () => {
+    const { requests } = serve(() => [
+      tree({ root: 'TODO', child: 'DONE', leafA: 'DONE', leafB: 'CANCELLED' }),
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<TaskListPage />);
+
+    await user.selectOptions(await statusOf('Validate'), 'IN_PROGRESS');
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Reopen parent tasks?',
+    });
+    expect(
+      within(dialog)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['API']);
+    expect(requests.filter((r) => r.method === 'PATCH')).toHaveLength(0);
+  });
+
+  it('moves a Done subtask to Cancelled without asking (it stays closed)', async () => {
+    const { requests } = serve(
+      () => [tree(ALL_DONE)],
+      () => jsonResponse({ task: makeTask(), cascadedTaskIds: [] }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<TaskListPage />);
+
+    await user.selectOptions(await statusOf('Upload'), 'CANCELLED');
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(requests.filter((r) => r.method === 'PATCH')).toEqual([
+        {
+          method: 'PATCH',
+          path: '/api/tasks/leaf-a/status',
+          body: { status: 'CANCELLED' },
+        },
+      ]);
+    });
   });
 
   it('asks before reopening a subtask of Done parents, and Cancel changes nothing', async () => {
