@@ -22,6 +22,11 @@ services:
   db:
     image: postgres:17.6-alpine
     restart: unless-stopped
+    # No cap_drop here: the postgres entrypoint needs to chown its data directory and
+    # switch to the postgres user. Privilege escalation is still blocked.
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
