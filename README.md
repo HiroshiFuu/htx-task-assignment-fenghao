@@ -2,7 +2,7 @@
 
 Full-stack task assignment app: Developers, Skills and Tasks (with unlimited nested subtasks). A task can only be assigned to a developer whose skills cover the task's required skills; tasks created without skills get them inferred by an LLM on the backend.
 
-> Status: **Phase P5 (LLM skill inference)**. Sections marked _TBD_ are filled in by later phases.
+> Status: **Phase P6 (Docker)**. Sections marked _TBD_ are filled in by later phases.
 
 ## Tech stack
 
@@ -52,7 +52,32 @@ npm run test:e2e:pg
 ```
 
 ### Full stack with Docker
-_TBD (Phase P6)_: `docker compose up --build` -> http://localhost:8080
+
+```powershell
+Copy-Item .env.example .env      # placeholders work as-is; GEMINI_API_KEY is optional
+docker compose up --build        # http://localhost:8080
+```
+
+That's all a fresh clone needs: no Node, no local database. The stack starts in order:
+
+```
+db (PostgreSQL 17, healthy) → migrate (prisma migrate deploy + idempotent seed, then exits)
+                             → api (NestJS, healthy) → web (nginx: SPA + /api reverse proxy, port 8080)
+```
+
+| Service | Image | Notes |
+|---|---|---|
+| `db` | `postgres:17.6-alpine` | Named volume `pgdata`; not published (the dev override adds `127.0.0.1:5433`) |
+| `migrate` | `backend/Dockerfile` target `migrate` | One-shot: applies the three migrations and seeds sample data, then exits; `api` waits for it to succeed |
+| `api` | `backend/Dockerfile` target `runtime` | `node` user, production dependencies and compiled code only (no Prisma CLI, no SQLite driver); internal port 3000, not published |
+| `web` | `frontend/Dockerfile` | `nginxinc/nginx-unprivileged` (non-root), serves the built SPA with a strict CSP and proxies `/api` to `api` on the same origin, so no CORS |
+
+- **Secrets:** `GEMINI_API_KEY` is passed to the `api` container at runtime only. It is never a build argument (which would stay in image layers) and is never given to `web`. `.dockerignore` keeps `.env` and `node_modules` out of every build context. Note that `docker compose config` prints the resolved key and database password: use `docker compose config --quiet` (validate only) or `--no-interpolate` before sharing its output.
+- **Container hardening:** non-root users everywhere; `cap_drop: ALL`, `no-new-privileges` and memory limits on `api`, `migrate` and `web`; the API's root filesystem is read-only (only `/tmp` is writable) and its code is root-owned. The Prisma schema engine is baked into the `migrate` image, so startup needs no internet access.
+- **Rate limits per client:** nginx overwrites `X-Forwarded-For` with the real client address, and the API trusts exactly one proxy hop (`TRUST_PROXY_HOPS=1`). Each user gets their own budget, and a client can't spoof its address.
+- **Edge hardening:** `server_tokens off`; 100k body limit and short client timeouts at nginx; only `GET`/`HEAD`/`POST`/`PATCH` reach the API; `/api/health` not exposed publicly (Docker's healthcheck calls the API directly); `api` re-resolved through Docker DNS so a recreated container keeps working; Swagger off unless `ENABLE_SWAGGER=true`; content-hashed assets cached as immutable; SPA deep links fall back to `index.html`.
+- **Development:** `docker-compose.override.yml` is loaded automatically. It publishes PostgreSQL on `127.0.0.1:5433` for migrations and PG e2e (`docker compose up -d db`), and binds the app to `127.0.0.1:8080` so the unauthenticated app isn't reachable from your LAN. For a production-like run, skip it: `docker compose -f docker-compose.yml up --build`.
+- **Reset everything:** `docker compose down -v` removes the containers and the database volume.
 
 ### Windows notes
 - npm scripts are cross-platform (no `rm -rf` / `export`); files use LF line endings via `.gitattributes`.
@@ -66,6 +91,9 @@ _Full table: TBD (Phase P7)_. See [`.env.example`](.env.example), [`backend/.env
 |---|---|---|
 | `GEMINI_API_KEY` | _(empty)_ | Optional. Enables LLM skill inference. Free key from Google AI Studio (Google account needed, no credit card). Without it the app uses keyword rules and logs a warning. |
 | `GEMINI_MODEL` | `gemini-3.1-flash-lite` | Gemini model name; check AI Studio for currently available models. |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `app` / `change-me` / `tasks` | Docker database credentials (root `.env`); compose builds the API's `DATABASE_URL` from them, so keep the password URL-safe |
+| `ENABLE_SWAGGER` | `false` in Docker, on in dev | Serves Swagger UI at `/api/docs` |
+| `TRUST_PROXY_HOPS` | `0` (`1` in Docker) | Reverse proxies in front of the API, so rate limits see real client IPs; leave 0 without a proxy |
 
 ## System design
 _Architecture diagram: TBD (Phase P7)_. Business rules and concurrency: see [API](#api).
@@ -263,21 +291,21 @@ Planned for v2, highest priority first. Items tagged with a phase came from that
 | Medium | Make LLM skill inference asynchronous (domain events / Observer + outbox) so task creation does not wait for the LLM. |
 | Medium | Generate frontend types from OpenAPI (`openapi-typescript`) instead of hand-written types. |
 | Medium | [P0] `db-reset.ts` checks the target path lexically (`path.resolve`), so a symlink/junction inside `prisma/` could bypass it; use `realpathSync` and require a `*.db` suffix. |
-| Medium | [P2] Behind the reverse proxy, rate limits would count the nginx IP for everyone; fixed in P6 with `trust proxy` and `X-Forwarded-For`. |
 | Low | Use the State pattern for status transitions if the rules grow more complex. |
 | Low | Edit task skills, delete tasks, paginate and filter tasks. |
 | Low | Playwright end-to-end tests. |
 | Low | Database triggers as defence in depth for the skill-match rule. |
 | Low | Cascade confirmations carry `expectedAffectedIds`, so the server asks again if the affected set changed (today `confirmCascade: true` is a blanket yes; flagged again in the P4 review). |
 | Low | [P0] `db-reset.ts`: strip `?query` from `DATABASE_URL`, compare `NODE_ENV` case-insensitively, and call `npx --no-install tsx`. |
-| Low | [P0] Pin the PostgreSQL image by digest, not only by tag. |
 | Low | [P1] The seed upserts skills by `id`; an existing skill with the same name but another id makes it fail (the transaction rolls back, no data loss). Upsert by `name` instead. |
 | Low | [P1] `skills.name` uniqueness is case-sensitive ("Frontend" and "frontend" could coexist); normalise skill names in the application before P5. |
 | Low | [P1] Seed errors print the full message, which may include the DB host or name (never the password); print only the error code in CI. |
 | Low | [P2] Nest turns `URIError` and unmatched routes into messages that echo the raw path; return a fixed message per status instead. |
 | Low | [P2] Interactive transactions use Prisma's defaults (`maxWait` 2s, `timeout` 5s); under heavy contention the timeout (P2028) becomes a 500. Map it to 503 with `Retry-After` or set explicit limits. |
-| Low | [P2] `/api/health` is not rate limited and queries the DB on each call; restrict it to the internal network in P6. |
 | Low | [P2] Add an e2e test for concurrent PATCHes on the same task (verifies `FOR UPDATE` serialisation). |
+| Medium | [P6] `api` and `migrate` share `POSTGRES_USER`, which the official image makes a superuser, so a compromised API would have superuser rights (e.g. `COPY … TO PROGRAM`). Keep the owner role for `migrate` and give `api` a DML-only `app_rw` role with its own `DATABASE_URL` (together with the high-priority item on separating migration and runtime users). |
+| Low | [P6] Base images (postgres, node, nginx-unprivileged) are pinned by tag, not by `@sha256` digest; pin digests and let Renovate/Dependabot update them. |
+| Low | [P6] Compose splices the database password into the connection URL, so `@ : / #` would break it; `.env.example` says to use URL-safe characters. |
 | Low | [P5, accepted] All titles of a tree go to the LLM in one request, so one title could try to steer the labels of its siblings. The impact is limited to the attacker's own request and labels stay within the skill enum; the system instruction tells the model each title describes only its own task. |
 | Low | [P4] The 422 `openSubtasks` and 409 `affectedTasks` responses include other tasks' titles. Fine in v1 (no auth; `GET /tasks` already shows every title), but they must be filtered by visibility once authentication exists. |
 | Low | [P4] `npm audit --omit=dev` (backend) reports 2 moderate js-yaml advisories via `@nestjs/swagger`; no High/Critical. Re-check in P7. |
