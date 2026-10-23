@@ -112,7 +112,15 @@ describe('Tasks API (e2e)', () => {
     });
 
     it('rejects titles with control characters (PG cannot store NUL)', async () => {
-      for (const title of ['a\u0000b', 'line\nbreak', 'tab\there']) {
+      for (const title of [
+        'a\u0000b',
+        'line\nbreak',
+        'tab\there',
+        'c1\u0085control',
+        // Right-to-left override and isolate: would render reversed for everyone.
+        'invoice‮fdp.exe',
+        'x⁦y',
+      ]) {
         expectProblem(
           await request(http).post('/api/tasks').send({ title }),
           400,
@@ -127,6 +135,11 @@ describe('Tasks API (e2e)', () => {
         skillIds: [FRONTEND.id.toUpperCase(), FRONTEND.id],
       });
       expect(task.skills).toEqual([{ id: FRONTEND.id, name: 'Frontend' }]);
+    });
+
+    it('still accepts non-Latin text and emoji', async () => {
+      const task = await createTask({ title: '更新个人资料页面 ✅ 👩‍💻' });
+      expect(task.title).toBe('更新个人资料页面 ✅ 👩‍💻');
     });
 
     it('accepts a 500-character title', async () => {

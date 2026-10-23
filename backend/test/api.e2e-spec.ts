@@ -11,18 +11,35 @@ const UNKNOWN_ID = '00000000-0000-4000-8000-000000000000';
 describe('API platform, skills and developers (e2e)', () => {
   let app: NestExpressApplication;
   let http: App;
+  const savedSwagger = process.env.ENABLE_SWAGGER;
 
   beforeAll(async () => {
     const prisma = createPrismaClient();
     await seed(prisma);
     await prisma.$disconnect();
 
+    // Explicit, so the result doesn't depend on the developer's local .env.
+    process.env.ENABLE_SWAGGER = 'true';
     app = await createTestApp();
     http = app.getHttpServer();
   });
 
   afterAll(async () => {
+    process.env.ENABLE_SWAGGER = savedSwagger;
     await app.close();
+  });
+
+  it('does not serve Swagger when ENABLE_SWAGGER=false', async () => {
+    process.env.ENABLE_SWAGGER = 'false';
+    const closed = await createTestApp();
+    try {
+      await request(closed.getHttpServer() as App)
+        .get('/api/docs-json')
+        .expect(404);
+    } finally {
+      process.env.ENABLE_SWAGGER = 'true';
+      await closed.close();
+    }
   });
 
   describe('platform', () => {
