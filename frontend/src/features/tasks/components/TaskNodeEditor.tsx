@@ -106,7 +106,10 @@ export function TaskNodeEditor({
       >
         <legend className="text-sm font-medium">
           Required skills for task {label}{' '}
-          <span className="font-normal text-slate-500">(optional)</span>
+          <span className="font-normal text-slate-500">
+            (optional: leave empty and they are detected automatically from the
+            title)
+          </span>
         </legend>
         <div className="flex flex-wrap gap-4">
           {skills.map((skill) => (
