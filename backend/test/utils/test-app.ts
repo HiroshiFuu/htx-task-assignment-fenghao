@@ -3,12 +3,23 @@ import { Test } from '@nestjs/testing';
 import type { Response } from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { configureApp } from '../../src/common/app-setup';
+import { KeywordClassifier } from '../../src/skill-inference/keyword-classifier';
+import { SkillClassifier } from '../../src/skill-inference/skill-classifier';
 
-/** Builds the app exactly like main.ts does (prefix, helmet, pipes, filter, Swagger). */
-export async function createTestApp(): Promise<NestExpressApplication> {
+/**
+ * Builds the app exactly like main.ts does (prefix, helmet, pipes, filter, Swagger).
+ * The skill classifier is always replaced, by default with the deterministic keyword
+ * rules, so a GEMINI_API_KEY in .env can never make tests call the real API.
+ */
+export async function createTestApp(
+  options: { classifier?: SkillClassifier } = {},
+): Promise<NestExpressApplication> {
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
-  }).compile();
+  })
+    .overrideProvider(SkillClassifier)
+    .useValue(options.classifier ?? new KeywordClassifier())
+    .compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({
     bodyParser: false,
   });

@@ -11,6 +11,7 @@ function row(id: string, parentId: string | null): TaskRow {
     assignee: null,
     parentId,
     position: 0,
+    skillSource: 'USER',
     skills: [],
     createdAt: at,
     updatedAt: at,

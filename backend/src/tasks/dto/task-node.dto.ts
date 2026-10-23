@@ -24,7 +24,8 @@ export class TaskNodeDto {
   @ApiProperty({
     enum: SKILL_SOURCES,
     enumName: 'SkillSource',
-    description: 'Where the skills came from. Always USER until Phase P5.',
+    description:
+      'Where the skills came from: USER (chosen when creating), LLM (inferred by Gemini) or FALLBACK (inferred by keyword rules because no LLM was configured or it failed).',
   })
   skillSource!: SkillSource;
 

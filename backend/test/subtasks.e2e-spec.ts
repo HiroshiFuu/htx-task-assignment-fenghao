@@ -116,7 +116,11 @@ describe('Subtasks (e2e)', () => {
       // Decision D8: each subtask keeps its own skills.
       expect(root.skills.map((s) => s.name)).toEqual(['Frontend']);
       expect(child.skills.map((s) => s.name)).toEqual(['Backend']);
-      expect(child.subtasks[0].skills).toEqual([]);
+      // No skills given: inferred from its own title ("upload" → both).
+      expect(child.subtasks[0].skills.map((s) => s.name)).toEqual([
+        'Backend',
+        'Frontend',
+      ]);
     });
 
     it('lists only top-level tasks, with subtasks nested', async () => {

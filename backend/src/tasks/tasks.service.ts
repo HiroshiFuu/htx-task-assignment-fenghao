@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   BusinessRuleViolation,
   ConfirmationRequired,
@@ -9,6 +9,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { RowLockStrategy } from '../common/prisma/row-lock.strategy';
 import { ValidationProblemException } from '../common/problem-details/validation-problem.exception';
 import { DevelopersRepository } from '../developers/developers.repository';
+import { SkillClassifier } from '../skill-inference/skill-classifier';
 import { SkillsRepository } from '../skills/skills.repository';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { TaskNodeDto, UpdateTaskStatusResultDto } from './dto/task-node.dto';
@@ -20,6 +21,7 @@ import {
   STATUS_TRANSITION_RULES,
   StatusTransitionRule,
 } from './rules/status-transition-rule';
+import { resolveTreeSkills } from './skill-resolution';
 import { buildTaskForest } from './task.mapper';
 import { TasksRepository } from './tasks.repository';
 import { checkTreeLimits } from './tree-limits';
@@ -40,6 +42,8 @@ function collectSkillIds(dto: CreateTaskDto): string[] {
  */
 @Injectable()
 export class TasksService {
+  private readonly logger = new Logger(TasksService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rowLock: RowLockStrategy,
@@ -50,6 +54,7 @@ export class TasksService {
     private readonly assignmentRules: readonly AssignmentRule[],
     @Inject(STATUS_TRANSITION_RULES)
     private readonly statusRules: readonly StatusTransitionRule[],
+    private readonly classifier: SkillClassifier,
   ) {}
 
   async list(): Promise<TaskNodeDto[]> {
@@ -74,7 +79,11 @@ export class TasksService {
     return tree;
   }
 
-  /** Validates every skill in the tree, then writes the whole tree in one transaction. */
+  /**
+   * Infers missing skills (one classifier call for the whole tree), then writes the
+   * tree in one transaction. The classifier runs first because a transaction must
+   * never wait on a network call.
+   */
   async create(dto: CreateTaskDto): Promise<TaskNodeDto> {
     // Also enforced by TreeLimitsMiddleware; re-checked here so the limit holds
     // even if that route binding changes (the DTO alone allows 50 per level).
@@ -84,9 +93,20 @@ export class TasksService {
         { field: violation.field, messages: [violation.message] },
       ]);
     }
+    const userSkillIds = collectSkillIds(dto);
+    // Fail fast on an unknown skill id, before spending an LLM call.
+    await this.assertSkillsExist(userSkillIds, this.prisma.client);
+    const skills = await this.skills.findSummaries();
+    if (skills.length === 0) {
+      // Only on an unseeded database: inferred tasks cannot get skills (decision D6).
+      this.logger.warn(
+        'No skills exist; tasks without skillIds are stored without skills. Run the seed.',
+      );
+    }
+    const resolved = await resolveTreeSkills(dto, skills, this.classifier);
     return this.prisma.client.$transaction(async (tx) => {
-      await this.assertSkillsExist(collectSkillIds(dto), tx);
-      const rootId = await this.tasks.createTree(dto, tx);
+      await this.assertSkillsExist(userSkillIds, tx);
+      const rootId = await this.tasks.createTree(resolved, tx);
       return this.get(rootId, tx);
     });
   }

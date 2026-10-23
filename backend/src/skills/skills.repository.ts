@@ -24,6 +24,14 @@ export class SkillsRepository {
     });
   }
 
+  /** Names are the vocabulary the skill classifier may answer with. */
+  findSummaries(db: DbClient = this.prisma.client) {
+    return db.skill.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async findExistingIds(
     ids: readonly string[],
     db: DbClient = this.prisma.client,

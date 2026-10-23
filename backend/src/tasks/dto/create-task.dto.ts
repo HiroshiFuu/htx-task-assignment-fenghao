@@ -56,7 +56,7 @@ export class CreateTaskDto {
     format: 'uuid',
     maxItems: MAX_SKILLS_PER_TASK,
     description:
-      'Required skill ids (duplicates removed). Leave empty to let the backend infer skills (Phase P5).',
+      'Required skill ids (duplicates removed). Leave empty and the backend infers them from the title (LLM, or keyword rules as a fallback).',
   })
   @IsOptional()
   @Transform(normalizeIds)
