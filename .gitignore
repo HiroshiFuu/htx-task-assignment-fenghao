@@ -23,8 +23,9 @@ Thumbs.db
 !.vscode/extensions.json
 .idea/
 
-# Claude Code
+# Claude Code (the author's private working rules; AGENTS.md is the public guide)
 .claude/
+CLAUDE.md
 
 # Backend: generated Prisma artifacts & local SQLite
 backend/prisma/dev.db*
