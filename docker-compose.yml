@@ -1,0 +1,94 @@
+# Full stack: `Copy-Item .env.example .env`, then `docker compose up --build`
+# and open http://localhost:8080.
+#
+# Startup order: db (healthy) → migrate (migrations + idempotent seed, then exits)
+# → api (healthy) → web. Only `web` publishes a port; the database and API stay on
+# the internal network. docker-compose.override.yml (loaded automatically) adds a
+# loopback-only database port for local development; for a production-like run
+# use `docker compose -f docker-compose.yml up --build`.
+name: task-assignment
+
+# Least privilege for the app containers: no extra Linux capabilities, no setuid
+# privilege escalation.
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-database-url: &database-url postgresql://${POSTGRES_USER:?set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:?set POSTGRES_DB in .env}
+
+services:
+  db:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    <<: *hardening
+    build:
+      context: ./backend
+      target: migrate
+    mem_limit: 512m
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    <<: *hardening
+    build:
+      context: ./backend
+      target: runtime
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    environment:
+      DATABASE_URL: *database-url
+      NODE_ENV: production
+      PORT: '3000'
+      # Runtime only: never a build arg (it would stay in the image layers) and
+      # never given to the web service.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}
+      THROTTLE_TTL_MS: ${THROTTLE_TTL_MS:-60000}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
+      THROTTLE_CREATE_TASK_LIMIT: ${THROTTLE_CREATE_TASK_LIMIT:-10}
+      # Exactly one proxy (web/nginx) sits in front, so rate limits see real client IPs.
+      TRUST_PROXY_HOPS: '1'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - '3000'
+
+  web:
+    <<: *hardening
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    mem_limit: 128m
+    ports:
+      - '8080:8080'
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:

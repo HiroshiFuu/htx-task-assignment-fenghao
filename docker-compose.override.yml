@@ -1,0 +1,12 @@
+# Development only, loaded automatically by `docker compose`. Leave this file out
+# for a production-like run: `docker compose -f docker-compose.yml up --build`.
+services:
+  db:
+    # For `npm run db:migrate:pg` and `npm run test:e2e:pg`; loopback only, and 5433
+    # avoids clashing with a local PostgreSQL.
+    ports:
+      - '127.0.0.1:5433:5432'
+  web:
+    # The app has no authentication (v1), so during local review keep it off the LAN.
+    ports: !override
+      - '127.0.0.1:8080:8080'
