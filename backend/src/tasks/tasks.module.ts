@@ -5,6 +5,7 @@ import {
   RequestMethod,
 } from '@nestjs/common';
 import { DevelopersModule } from '../developers/developers.module';
+import { SkillInferenceModule } from '../skill-inference/skill-inference.module';
 import { SkillsModule } from '../skills/skills.module';
 import { AllDescendantsDoneRule } from './rules/all-descendants-done.rule';
 import { AncestorRollbackRule } from './rules/ancestor-rollback.rule';
@@ -20,7 +21,7 @@ import { TasksService } from './tasks.service';
 import { TreeLimitsMiddleware } from './tree-limits.middleware';
 
 @Module({
-  imports: [SkillsModule, DevelopersModule],
+  imports: [SkillsModule, DevelopersModule, SkillInferenceModule],
   controllers: [TasksController],
   providers: [
     TasksService,

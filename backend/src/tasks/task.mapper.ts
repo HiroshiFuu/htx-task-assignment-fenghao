@@ -10,8 +10,7 @@ function toTaskNode(row: TaskRow): TaskNodeDto {
     skills: row.skills
       .map(({ skill }) => ({ id: skill.id, name: skill.name }))
       .sort(byName),
-    // Persisted from Phase P5 (skill_source column); user-supplied until then.
-    skillSource: 'USER',
+    skillSource: row.skillSource,
     assignee: row.assignee,
     parentId: row.parentId,
     subtasks: [],

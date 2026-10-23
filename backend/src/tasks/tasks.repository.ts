@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, TaskStatus } from '../generated/prisma/client';
 import { DbClient } from '../common/prisma/db-client';
 import { PrismaService } from '../common/prisma/prisma.service';
-import type { CreateTaskDto } from './dto/create-task.dto';
 import type { TaskRef } from './rules/rule';
+import type { ResolvedTask } from './skill-resolution';
 
 const TASK_INCLUDE = {
   skills: { include: { skill: true } },
@@ -37,19 +37,18 @@ function toTaskRef(row: RawTaskRef): TaskRef {
 }
 
 function toNestedCreate(
-  dto: CreateTaskDto,
+  task: ResolvedTask,
   position: number,
 ): Prisma.TaskCreateWithoutParentInput {
   return {
-    title: dto.title,
+    title: task.title,
     position,
+    skillSource: task.skillSource,
     skills: {
-      create: (dto.skillIds ?? []).map((skillId) => ({ skillId })),
+      create: task.skillIds.map((skillId) => ({ skillId })),
     },
     subtasks: {
-      create: (dto.subtasks ?? []).map((child, index) =>
-        toNestedCreate(child, index),
-      ),
+      create: task.subtasks.map((child, index) => toNestedCreate(child, index)),
     },
   };
 }
@@ -114,9 +113,9 @@ export class TasksRepository {
   }
 
   /** Writes the whole tree with Prisma nested creates; returns the root id. */
-  async createTree(dto: CreateTaskDto, db: DbClient): Promise<string> {
+  async createTree(task: ResolvedTask, db: DbClient): Promise<string> {
     const root = await db.task.create({
-      data: toNestedCreate(dto, 0),
+      data: toNestedCreate(task, 0),
       select: { id: true },
     });
     return root.id;

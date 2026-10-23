@@ -10,6 +10,6 @@ export const throttleTtlMs = (): number =>
 
 export const throttleLimit = (): number => intFromEnv('THROTTLE_LIMIT', 100);
 
-/** POST /api/tasks triggers LLM calls (Phase P5), so it gets a tighter budget. */
+/** POST /api/tasks may call the LLM (cost and latency), so it gets a tighter budget. */
 export const createTaskThrottleLimit = (): number =>
   intFromEnv('THROTTLE_CREATE_TASK_LIMIT', 10);
