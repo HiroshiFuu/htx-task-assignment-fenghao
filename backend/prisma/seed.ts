@@ -1,11 +1,12 @@
 import 'dotenv/config';
 import type { PrismaClient } from '../src/generated/prisma/client';
 import { createPrismaClient } from '../src/common/prisma/prisma-client.factory';
-import { SEED_DEVELOPERS, SEED_SKILLS } from './seed-data';
+import { flattenSeedTasks, SEED_DEVELOPERS, SEED_SKILLS } from './seed-data';
 
 /**
- * Idempotent: upserts by fixed id and makes each seeded developer's skill set
- * match the seed exactly, so running it repeatedly never duplicates rows.
+ * Idempotent: upserts by fixed id and resets each seeded developer's skills and
+ * each seeded task's fields and skills to the seed, so running it repeatedly never
+ * duplicates rows. Tasks created through the app are left untouched.
  */
 export async function seed(prisma: PrismaClient): Promise<void> {
   await prisma.$transaction(async (tx) => {
@@ -38,6 +39,34 @@ export async function seed(prisma: PrismaClient): Promise<void> {
         });
       }
     }
+
+    // Parents come first, so every parent_id already exists.
+    for (const { task, parentId, position } of flattenSeedTasks()) {
+      const fields = {
+        title: task.title,
+        status: task.status,
+        assigneeId: task.assignee?.id ?? null,
+        parentId,
+        position,
+      };
+      await tx.task.upsert({
+        where: { id: task.id },
+        create: { id: task.id, ...fields },
+        update: fields,
+      });
+
+      const skillIds = task.skills.map((skill) => skill.id);
+      await tx.taskSkill.deleteMany({
+        where: { taskId: task.id, skillId: { notIn: skillIds } },
+      });
+      for (const skillId of skillIds) {
+        await tx.taskSkill.upsert({
+          where: { taskId_skillId: { taskId: task.id, skillId } },
+          create: { taskId: task.id, skillId },
+          update: {},
+        });
+      }
+    }
   });
 }
 
@@ -46,7 +75,7 @@ async function main(): Promise<void> {
   try {
     await seed(prisma);
     console.log(
-      `✔ Seeded ${Object.keys(SEED_SKILLS).length} skills and ${SEED_DEVELOPERS.length} developers`,
+      `✔ Seeded ${Object.keys(SEED_SKILLS).length} skills, ${SEED_DEVELOPERS.length} developers and ${flattenSeedTasks().length} tasks`,
     );
   } finally {
     await prisma.$disconnect();
