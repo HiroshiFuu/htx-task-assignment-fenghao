@@ -16,9 +16,10 @@ export const TITLE_MAX_LENGTH = 500;
 export const MAX_SKILLS_PER_TASK = 20;
 
 // PostgreSQL rejects NUL in text columns (→ 500) while SQLite accepts it, so control
-// characters are refused up front to keep both dialects and the UI consistent.
-// eslint-disable-next-line no-control-regex
-const NO_CONTROL_CHARACTERS = /^[^\u0000-\u001F\u007F]*$/;
+// characters (C0, DEL, C1) are refused up front to keep both dialects consistent.
+// Bidi overrides/isolates are refused too: they make a title render reversed or
+// misleading for everyone who sees the list. Mirrored in the frontend's task-draft.ts.
+const NO_CONTROL_CHARACTERS = /^[^\p{Cc}‪-‮⁦-⁩]*$/u;
 
 const trimString = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
@@ -47,7 +48,7 @@ export class CreateTaskDto {
   @IsString()
   @Length(1, TITLE_MAX_LENGTH)
   @Matches(NO_CONTROL_CHARACTERS, {
-    message: 'title must not contain control characters',
+    message: 'title must not contain control or text-direction characters',
   })
   title!: string;
 

@@ -4,9 +4,9 @@ export const TITLE_MAX_LENGTH = 500;
 /** Mirrors the backend (decision D10): levels including the root, and tasks per request. */
 export const MAX_DEPTH = 5;
 export const MAX_NODES = 50;
-// Mirrors the backend: PostgreSQL cannot store NUL, and titles are single-line.
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
+// Mirrors the backend: PostgreSQL cannot store NUL, titles are single-line, and
+// bidi overrides would make a title render reversed for everyone.
+const CONTROL_CHARACTERS = /[\p{Cc}‪-‮⁦-⁩]/u;
 
 export interface DraftNode {
   /** Stable React key; never sent to the API. */
@@ -211,7 +211,7 @@ export function validateTitle(title: string): string | undefined {
     return `Title must be ${String(TITLE_MAX_LENGTH)} characters or fewer.`;
   }
   if (CONTROL_CHARACTERS.test(trimmed)) {
-    return 'Title cannot contain tabs or other control characters.';
+    return 'Title cannot contain tabs, control or text-direction characters.';
   }
   return undefined;
 }

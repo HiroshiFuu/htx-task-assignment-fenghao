@@ -23,8 +23,8 @@ Thumbs.db
 !.vscode/extensions.json
 .idea/
 
-# Claude Code local settings
-.claude/settings.local.json
+# Claude Code
+.claude/
 
 # Backend: generated Prisma artifacts & local SQLite
 backend/prisma/dev.db*

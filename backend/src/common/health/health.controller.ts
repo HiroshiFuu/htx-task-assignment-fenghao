@@ -5,14 +5,14 @@ import {
   ApiServiceUnavailableResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
 import { ProblemDetailsDto } from '../problem-details/problem-details.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { HealthDto } from './health.dto';
 
+// Rate limited like any route: it queries the database, and Docker's healthcheck
+// (one call every 10s) stays far below the global limit.
 @ApiTags('health')
 @Controller('health')
-@SkipThrottle()
 export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 

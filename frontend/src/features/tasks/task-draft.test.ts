@@ -134,7 +134,18 @@ describe('validation', () => {
     ['', 'Enter a title.'],
     ['   ', 'Enter a title.'],
     ['x'.repeat(501), 'Title must be 500 characters or fewer.'],
-    ['tab\there', 'Title cannot contain tabs or other control characters.'],
+    [
+      'tab\there',
+      'Title cannot contain tabs, control or text-direction characters.',
+    ],
+    [
+      'evil‮txt.exe',
+      'Title cannot contain tabs, control or text-direction characters.',
+    ],
+    [
+      'c1\u0085control',
+      'Title cannot contain tabs, control or text-direction characters.',
+    ],
   ])('rejects %j', (title, message) => {
     expect(validateTitle(title)).toBe(message);
   });
