@@ -1,6 +1,11 @@
 @import 'tailwindcss';
 
 @layer base {
+  /* Keeps focused controls and anchor targets clear of the sticky header. */
+  html {
+    scroll-padding-top: 5rem;
+  }
+
   body {
     @apply bg-slate-50 text-slate-900 antialiased;
   }
